@@ -19,6 +19,15 @@ The script consolidates expanded package workflows into one root-run tool with:
 - Shared logging and exit codes for automation
 - Auto-repair for selected Microsoft apps using Microsoft-hosted packages
 
+## Screenshots
+
+![M365R-00001](images/M365R-00001.png)
+![M365R-00002](images/M365R-00002.png)
+![M365R-00003](images/M365R-00003.png)
+![M365R-00004](images/M365R-00004.png)
+![M365R-00005](images/M365R-00005.png)
+![M365R-00006](images/M365R-00006.png)
+
 ## Requirements
 
 - macOS with `zsh`
