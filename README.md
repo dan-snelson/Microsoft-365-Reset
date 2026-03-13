@@ -1,4 +1,4 @@
-# Microsoft 365 Reset
+# Microsoft 365 Reset (0.0.1a2)
 
 ![Microsoft 365 Reset](images/Microsoft_365_Reset.png)
 
@@ -18,6 +18,16 @@ The script consolidates expanded package workflows into one root-run tool with:
 - Deterministic execution order
 - Shared logging and exit codes for automation
 - Auto-repair for selected Microsoft apps using Microsoft-hosted packages
+- MOFA community-maintained reset script contents adapted into the unified workflow
+
+[MOFA](https://mofa.cocolabs.dev/macos_tools/microsoft_office_repair_tools.html) parity notes:
+
+- `reset_factory` performs its own MOFA-style suite cleanup in addition to dependency expansion
+- App repair/reinstall flows for Word, Excel, PowerPoint, Outlook, and OneNote now stop after repair instead of continuing with configuration cleanup in the same run
+- `reset_teams` preserves Teams backgrounds, resets Teams TCC state, and opens Screen Recording settings in interactive modes
+- Teams reset and AutoUpdate registration now treat new Teams as the current `TEAMS21` product while keeping classic Teams on the legacy product ID
+- Separate `reset_license` and `reset_credentials` operations cover MOFA's split between license-only and broader sign-in reset flows
+- `reset_teams_force` provides a force-reinstall path for Teams without adding a new CLI parameter
 
 ## Screenshots
 
@@ -91,7 +101,9 @@ Use these IDs in `--operations` CSV:
 | `remove_onenote_data` | Remove OneNote cached local data |
 | `reset_onedrive` | OneDrive repair checks + cache/container/keychain cleanup |
 | `reset_teams` | Teams classic/new checks + Teams cache/container/keychain cleanup |
+| `reset_teams_force` | Force-remove and reinstall Teams, then perform Teams cache/container/keychain cleanup |
 | `reset_autoupdate` | Reset MAU prefs/cache and reinstall/update MAU when applicable |
+| `reset_license` | Reset Office licensing files and core Office identity data |
 | `reset_credentials` | Remove Office licensing/sign-in artifacts and token/keychain data |
 | `remove_office` | Full Microsoft 365 removal workflow |
 | `remove_skypeforbusiness` | Remove Skype for Business app/data/keychain entries |
@@ -104,6 +116,8 @@ Use these IDs in `--operations` CSV:
 The script enforces package-equivalent dependencies:
 
 - Selecting `reset_factory` auto-adds `reset_word`, `reset_excel`, `reset_powerpoint`, `reset_outlook`, `reset_onenote`, `reset_onedrive`, `reset_teams`, `reset_autoupdate`, and `reset_credentials`
+- Selecting `reset_credentials` suppresses `reset_license`
+- Selecting `reset_teams_force` suppresses `reset_teams`
 - Selecting `remove_office` auto-adds `remove_skypeforbusiness`
 - Selecting `remove_office` suppresses reset-family selections
 

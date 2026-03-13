@@ -14,6 +14,12 @@
 #
 # HISTORY
 #
+# Version 0.0.1a2, 13-Mar-2026, Dan K. Snelson
+#   - Aligned cleanup targets with MOFA community-maintained reset scripts
+#   - Added MOFA-style factory reset cleanup and Teams reset behavior
+#   - Skip app configuration cleanup after repair/reinstall to match MOFA app reset scripts
+#   - Added license-only reset and Teams force-reinstall operations
+#
 # Version 0.0.1a1, 12-Mar-2026, Dan K. Snelson
 #   - Initial unified script implementation
 #
@@ -31,7 +37,7 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin/
 setopt NONOMATCH
 
 # Script identity
-scriptVersion="0.0.1a1"
+scriptVersion="0.0.1a2"
 humanReadableScriptName="Microsoft 365 Reset"
 scriptName="M365R"
 
@@ -127,7 +133,9 @@ operationIDs=(
     remove_onenote_data
     reset_onedrive
     reset_teams
+    reset_teams_force
     reset_autoupdate
+    reset_license
     reset_credentials
     remove_office
     remove_skypeforbusiness
@@ -147,7 +155,9 @@ operationTitle[reset_onenote]="Reset OneNote"
 operationTitle[remove_onenote_data]="Remove cached OneNote data"
 operationTitle[reset_onedrive]="Reset OneDrive"
 operationTitle[reset_teams]="Reset Teams"
+operationTitle[reset_teams_force]="Reset Teams (Force Reinstall)"
 operationTitle[reset_autoupdate]="Reset AutoUpdate"
+operationTitle[reset_license]="Reset License Only"
 operationTitle[reset_credentials]="Reset License and Sign-In"
 operationTitle[remove_office]="Completely remove Microsoft 365"
 operationTitle[remove_skypeforbusiness]="Remove Skype for Business"
@@ -166,7 +176,9 @@ operationDescription[reset_onenote]="Closes Microsoft OneNote, checks for damage
 operationDescription[remove_onenote_data]="Closes Microsoft OneNote and removes cached data. Warning: This will remove any content that has not synchronized with the cloud."
 operationDescription[reset_onedrive]="Closes Microsoft OneDrive, checks for damage and performs repairs as necessary. Resets caches and configuration data. This will not remove your synchronized OneDrive files."
 operationDescription[reset_teams]="Closes Microsoft Teams, checks for damage and performs repairs as necessary. Resets caches, credentials and configuration data."
+operationDescription[reset_teams_force]="Closes Microsoft Teams, removes the current Teams app bundle, reinstalls the latest version, and then resets Teams caches, credentials and configuration data."
 operationDescription[reset_autoupdate]="Resets Microsoft AutoUpdate to default settings and installs the latest version of the tool."
+operationDescription[reset_license]="Closes all apps and removes Office licensing files plus core Office identity data without the broader Teams and OneDrive sign-in cleanup."
 operationDescription[reset_credentials]="Closes all apps and removes the Office license files. Sign-in credentials and cached tokens are removed from keychain."
 operationDescription[remove_office]="Removes all Microsoft 365 and Office apps, components, add-ins, templates and configuration data."
 operationDescription[remove_skypeforbusiness]="Closes Microsoft Skype for Business and then removes the application, configuration data, and keychain items."
@@ -429,12 +441,20 @@ function verifyMicrosoftPkgSignature() {
 
 function downloadResolvedPkgURL() {
     local url="$1"
-    /usr/bin/nscurl --location --head "${url}" --dump-header - 2>/dev/null | awk '/Location/{print $2}' | tail -1 | awk '{$1=$1};1'
+    /usr/bin/nscurl --location --head "${url}" --dump-header - 2>/dev/null \
+        | grep -i '^Location:' \
+        | tail -1 \
+        | awk -F': ' '{print $2}' \
+        | tr -d '\r'
 }
 
 function contentLengthForURL() {
     local url="$1"
-    /usr/bin/nscurl --location --head "${url}" --dump-header - 2>/dev/null | awk '/Content-Length/{print $2}' | tail -1 | awk '{$1=$1};1'
+    /usr/bin/nscurl --location --head "${url}" --dump-header - 2>/dev/null \
+        | grep -i '^Content-Length:' \
+        | tail -1 \
+        | awk -F': ' '{print $2}' \
+        | tr -d '\r'
 }
 
 function repairFromMicrosoftPkg() {
@@ -532,6 +552,7 @@ function maybeRepairOfficeApp() {
     local fullUpdater
     local customVersion
     local codesignError
+    local repairPerformed="false"
 
     if [[ ! -d "${appPath}" ]]; then
         info "${appName} not found in default location"
@@ -549,6 +570,7 @@ function maybeRepairOfficeApp() {
         if ! is-at-least 16.73 "${appVersion}" && is-at-least 11.0.0 "${osVersion}"; then
             info "${appName} is outdated; repairing"
             repairFromMicrosoftPkg "${appName}" "${download2019}" "" || return 1
+            repairPerformed="true"
         fi
 
         customInfo="$(resolveCustomManifest "${manifestProductID}")"
@@ -558,11 +580,13 @@ function maybeRepairOfficeApp() {
             info "${appName} pinned version mismatch (${appVersion} != ${customVersion}); reinstalling"
             safeRemove "${appPath}"
             repairFromMicrosoftPkg "${appName}" "${download2019}" "${fullUpdater}" || return 1
+            repairPerformed="true"
         fi
     else
         if ! is-at-least 16.16 "${appVersion}"; then
             info "${appName} legacy generation outdated; repairing"
             repairFromMicrosoftPkg "${appName}" "${download2016}" "" || return 1
+            repairPerformed="true"
         fi
     fi
 
@@ -581,7 +605,13 @@ function maybeRepairOfficeApp() {
                 fullUpdater="${customInfo%%|*}"
                 repairFromMicrosoftPkg "${appName}" "${download2019}" "${fullUpdater}" || return 1
             fi
+            repairPerformed="true"
         fi
+    fi
+
+    if [[ "${repairPerformed}" == "true" ]]; then
+        info "${appName} repair completed; skipping configuration cleanup to match MOFA behavior"
+        return 2
     fi
 
     return 0
@@ -786,6 +816,36 @@ function resolveDependencies() {
         addOperationUnique reset_credentials
     fi
 
+    if hasOperation "reset_credentials"; then
+        local retained=()
+        for op in "${selectedOperations[@]}"; do
+            case "${op}" in
+                reset_license)
+                    ;;
+                *)
+                    retained+=("${op}")
+                    ;;
+            esac
+        done
+        selectedOperations=("${retained[@]}")
+        addOperationUnique reset_credentials
+    fi
+
+    if hasOperation "reset_teams_force"; then
+        local retained=()
+        for op in "${selectedOperations[@]}"; do
+            case "${op}" in
+                reset_teams)
+                    ;;
+                *)
+                    retained+=("${op}")
+                    ;;
+            esac
+        done
+        selectedOperations=("${retained[@]}")
+        addOperationUnique reset_teams_force
+    fi
+
     if hasOperation "remove_office"; then
         addOperationUnique remove_skypeforbusiness
 
@@ -793,7 +853,7 @@ function resolveDependencies() {
         local retained=()
         for op in "${selectedOperations[@]}"; do
             case "${op}" in
-                reset_factory|reset_word|reset_excel|reset_powerpoint|reset_outlook|reset_onenote|reset_onedrive|reset_teams|reset_autoupdate|reset_credentials)
+                reset_factory|reset_word|reset_excel|reset_powerpoint|reset_outlook|reset_onenote|reset_onedrive|reset_teams|reset_teams_force|reset_autoupdate|reset_license|reset_credentials)
                     ;;
                 *)
                     retained+=("${op}")
@@ -865,6 +925,18 @@ function startProgressDialog() {
 }
 
 function updateProgressDialog() {
+    local current="$1"
+    local total="$2"
+    local progressStatus="$3"
+    [[ "${operationMode}" == "silent" ]] && return 0
+
+    local completed=$(( current - 1 ))
+    local pct=$(( ( completed * 100 ) / total ))
+    writeDialogCommand "progress: ${pct}"
+    writeDialogCommand "progresstext: ${progressStatus}"
+}
+
+function updateCompletedProgressDialog() {
     local current="$1"
     local total="$2"
     local progressStatus="$3"
@@ -967,6 +1039,12 @@ function stopCommonOfficeProcesses() {
     pkill -9 'FinderSync' 2>/dev/null
     pkill -9 'OneDriveStandaloneUpdater' 2>/dev/null
     pkill -9 'OneDriveUpdater' 2>/dev/null
+    pkill -9 'MSTeams' 2>/dev/null
+    pkill -9 'Microsoft Teams' 2>/dev/null
+    pkill -9 'Microsoft Teams Helper' 2>/dev/null
+    pkill -9 'Microsoft Teams WebView' 2>/dev/null
+    pkill -9 'Microsoft Teams Launcher' 2>/dev/null
+    pkill -9 'Microsoft Teams (work preview)' 2>/dev/null
     pkill -9 'Microsoft Teams*' 2>/dev/null
     pkill -9 'Microsoft AutoUpdate' 2>/dev/null
     pkill -9 'Microsoft Update Assistant' 2>/dev/null
@@ -1016,9 +1094,15 @@ function removeOfficePreinstall() {
     safeRemove "${loggedInUserHome}/Library/Application Support/Microsoft"
 
     safeRemove "${loggedInUserHome}/Library/Application Scripts/com.microsoft.errorreporting"
+    safeRemove "${loggedInUserHome}/Library/Application Scripts/com.microsoft.OneDrive.FinderSync"
+    safeRemove "${loggedInUserHome}/Library/Application Scripts/com.microsoft.OneDrive.FileProvider"
     safeRemove "${loggedInUserHome}/Library/Application Scripts/UBF8T346G9.com.microsoft.oneauth"
+    safeRemove "${loggedInUserHome}/Library/Application Scripts/UBF8T346G9.OfficeOneDriveSyncIntegration"
     safeRemove "${loggedInUserHome}/Library/Application Scripts/UBF8T346G9.Office"
+    safeRemove "${loggedInUserHome}/Library/Application Scripts/UBF8T346G9.OneDriveStandaloneSuite"
+    safeRemove "${loggedInUserHome}/Library/Application Scripts/UBF8T346G9.OneDriveSyncClientSuite"
     safeRemove "${loggedInUserHome}/Library/Application Scripts/UBF8T346G9.ms"
+    safeRemove "${loggedInUserHome}/Library/Application Scripts/UBF8T346G9.Kfm"
     safeRemove "${loggedInUserHome}/Library/Application Scripts/UBF8T346G9.OfficeOsfWebHost"
 
     safeRemove "/Library/LaunchAgents/com.microsoft.update.agent.plist"
@@ -1084,13 +1168,22 @@ function removeOfficePreinstall() {
     safeRemove "${loggedInUserHome}/Library/Caches/Microsoft"
 
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office"
+    safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.OfficeOneDriveSyncIntegration"
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.ms"
+    safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.OneDriveStandaloneSuite"
+    safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.OneDriveSyncClientSuite"
+    safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Kfm"
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.OfficeOsfWebHost"
     safeRemove "${loggedInUserHome}/Library/Group Containers/group.com.microsoft"
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.com.microsoft.oneauth"
 
     safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.errorreporting"
     safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.netlib.shipassertprocess"
+    safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.OneDrive-mac"
+    safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.OneDrive.FinderSync"
+    safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.OneDrive-mac.FinderSync"
+    safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.OneDriveLauncher"
+    safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.OneDrive.FileProvider"
     safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.Office365ServiceV2"
     safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.RMS-XPCService"
 
@@ -1191,6 +1284,15 @@ function registerMAUApplicationIfPresent() {
     fi
 }
 
+function registerMAUStaticApplicationIfPresent() {
+    local appPath="$1"
+    local appMetadata="$2"
+
+    if [[ -d "${appPath}" ]]; then
+        defaults write /Library/Preferences/com.microsoft.autoupdate2 ApplicationsSystem -dict-add "${appPath}" "${appMetadata}" >>"${scriptLog}" 2>&1
+    fi
+}
+
 
 ####################################################################################################
 #
@@ -1198,10 +1300,69 @@ function registerMAUApplicationIfPresent() {
 #
 ####################################################################################################
 
+function cleanupFactoryResetArtifacts() {
+    safeRemove "/Library/Logs/Microsoft/autoupdate.log"
+    safeRemove "/Library/Logs/Microsoft/InstallLogs"
+    safeRemove "/Library/Logs/Microsoft/Teams"
+    safeRemove "/Library/Logs/Microsoft/OneDrive"
+
+    safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.autoupdate2.plist"
+    safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.autoupdate.fba.plist"
+    safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.shared.plist"
+    safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.office.plist"
+    safeRemove "/Library/Preferences/com.microsoft.autoupdate.fba.plist"
+    safeRemove "/Library/Preferences/com.microsoft.shared.plist"
+    safeRemove "/Library/Preferences/com.microsoft.office.plist"
+    safeRemove "/Library/Preferences/com.microsoft.teams.plist"
+    safeRemove "/Library/Managed Preferences/com.microsoft.shared.plist"
+    safeRemove "/Library/Managed Preferences/com.microsoft.office.plist"
+    safeRemove "/var/root/Library/Preferences/com.microsoft.autoupdate2.plist"
+    safeRemove "/var/root/Library/Preferences/com.microsoft.autoupdate.fba.plist"
+
+    safeRemove "${loggedInUserHome}/Library/Application Support/Microsoft"
+    safeRemove "${loggedInUserHome}/Library/Caches/com.microsoft.autoupdate2"
+    safeRemove "${loggedInUserHome}/Library/Caches/com.microsoft.autoupdate.fba"
+    safeRemove "/Library/Application Support/Microsoft/Office365"
+
+    safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office"
+    safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.ms"
+    safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.OfficeOsfWebHost"
+
+    safeRemove "${loggedInUserHome}/Library/Application Scripts/UBF8T346G9.com.microsoft.oneauth"
+    safeRemove "${loggedInUserHome}/Library/Application Scripts/UBF8T346G9.Office"
+    safeRemove "${loggedInUserHome}/Library/Application Scripts/UBF8T346G9.ms"
+    safeRemove "${loggedInUserHome}/Library/Application Scripts/UBF8T346G9.OfficeOsfWebHost"
+    safeRemove "${loggedInUserHome}/Library/Application Scripts/UBF8T346G9.OfficeOneDriveSyncIntegration"
+
+    safeRemove "${loggedInUserHome}/Library/Cookies/com.microsoft.OneDrive.binarycookies"
+    safeRemove "${loggedInUserHome}/Library/Cookies/com.microsoft.OneDriveUpdater.binarycookies"
+    safeRemove "${loggedInUserHome}/Library/Cookies/com.microsoft.OneDriveStandaloneUpdater.binarycookies"
+    safeRemove "${loggedInUserHome}/Library/Cookies/com.microsoft.teams.binarycookies"
+
+    safeRemove "${loggedInUserHome}/Library/HTTPStorages/com.microsoft.autoupdate.fba"
+    safeRemove "${loggedInUserHome}/Library/HTTPStorages/com.microsoft.autoupdate2"
+    safeRemove "${loggedInUserHome}/Library/HTTPStorages/com.microsoft.OneDrive"
+    safeRemove "${loggedInUserHome}/Library/HTTPStorages/com.microsoft.OneDriveStandaloneUpdater"
+    safeRemove "${loggedInUserHome}/Library/HTTPStorages/com.microsoft.teams"
+
+    safeRemove "${loggedInUserHome}/Library/HTTPStorages/com.microsoft.autoupdate.fba.binarycookies"
+    safeRemove "${loggedInUserHome}/Library/HTTPStorages/com.microsoft.autoupdate2.binarycookies"
+    safeRemove "${loggedInUserHome}/Library/HTTPStorages/com.microsoft.OneDrive.binarycookies"
+    safeRemove "${loggedInUserHome}/Library/HTTPStorages/com.microsoft.OneDriveStandaloneUpdater.binarycookies"
+    safeRemove "${loggedInUserHome}/Library/HTTPStorages/com.microsoft.teams.binarycookies"
+
+    safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.errorreporting"
+    safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.netlib.shipassertprocess"
+    safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.Office365ServiceV2"
+    safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.RMS-XPCService"
+}
+
 function op_reset_factory() {
     info "Starting operation: reset_factory"
     stopCommonOfficeProcesses
+    pkill -9 'Microsoft Teams Helper' 2>/dev/null
     pkill -9 'com.microsoft.teams2.launcher' 2>/dev/null
+    cleanupFactoryResetArtifacts
     return 0
 }
 
@@ -1227,7 +1388,10 @@ function op_reset_word() {
         "https://go.microsoft.com/fwlink/?linkid=525134" \
         "https://go.microsoft.com/fwlink/?linkid=871748" \
         "MSWD2019" \
-        "${osVersion}" || return 1
+        "${osVersion}"
+    local repairRC=$?
+    [[ ${repairRC} -eq 1 ]] && return 1
+    [[ ${repairRC} -eq 2 ]] && return 0
 
     safeRemove "/Library/Preferences/com.microsoft.Word.plist"
     safeRemove "/Library/Managed Preferences/com.microsoft.Word.plist"
@@ -1265,7 +1429,10 @@ function op_reset_excel() {
         "https://go.microsoft.com/fwlink/?linkid=525135" \
         "https://go.microsoft.com/fwlink/?linkid=871750" \
         "XCEL2019" \
-        "${osVersion}" || return 1
+        "${osVersion}"
+    local repairRC=$?
+    [[ ${repairRC} -eq 1 ]] && return 1
+    [[ ${repairRC} -eq 2 ]] && return 0
 
     safeRemove "/Library/Preferences/com.microsoft.Excel.plist"
     safeRemove "/Library/Managed Preferences/com.microsoft.Excel.plist"
@@ -1308,7 +1475,10 @@ function op_reset_powerpoint() {
         "https://go.microsoft.com/fwlink/?linkid=525136" \
         "https://go.microsoft.com/fwlink/?linkid=871751" \
         "PPT32019" \
-        "${osVersion}" || return 1
+        "${osVersion}"
+    local repairRC=$?
+    [[ ${repairRC} -eq 1 ]] && return 1
+    [[ ${repairRC} -eq 2 ]] && return 0
 
     safeRemove "/Library/Preferences/com.microsoft.Powerpoint.plist"
     safeRemove "/Library/Managed Preferences/com.microsoft.Powerpoint.plist"
@@ -1351,7 +1521,10 @@ function op_reset_outlook() {
         "https://go.microsoft.com/fwlink/?linkid=525137" \
         "https://go.microsoft.com/fwlink/?linkid=871753" \
         "OPIM2019" \
-        "${osVersion}" || return 1
+        "${osVersion}"
+    local repairRC=$?
+    [[ ${repairRC} -eq 1 ]] && return 1
+    [[ ${repairRC} -eq 2 ]] && return 0
 
     safeRemove "/Library/Preferences/com.microsoft.Outlook.plist"
     safeRemove "/Library/Managed Preferences/com.microsoft.Outlook.plist"
@@ -1422,7 +1595,10 @@ function op_reset_onenote() {
         "https://go.microsoft.com/fwlink/?linkid=820886" \
         "https://go.microsoft.com/fwlink/?linkid=871755" \
         "ONMC2019" \
-        "${osVersion}" || return 1
+        "${osVersion}"
+    local repairRC=$?
+    [[ ${repairRC} -eq 1 ]] && return 1
+    [[ ${repairRC} -eq 2 ]] && return 0
 
     safeRemove "/Library/Preferences/com.microsoft.onenote.mac.plist"
     safeRemove "/Library/Managed Preferences/com.microsoft.onenote.mac.plist"
@@ -1571,49 +1747,61 @@ function op_reset_onedrive() {
     return 0
 }
 
-function op_reset_teams() {
-    info "Starting operation: reset_teams"
+function resetTeamsOperation() {
+    local forceReinstall="${1:-false}"
     local osVersion
+    local teamsAppPath="/Applications/Microsoft Teams.app"
+    local classicTeamsPath="/Applications/Microsoft Teams classic.app"
+    local workOrSchoolTeamsPath="/Applications/Microsoft Teams (work or school).app"
+    local classicBackgroundsPath="${loggedInUserHome}/Library/Application Support/Microsoft/Teams/Backgrounds"
+    local modernBackgroundsPath="${loggedInUserHome}/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/Backgrounds"
+    local modernBackgroundsStaging="/tmp/${scriptName}_Teams_Backgrounds"
+    local teamsBackgroundArchive="${loggedInUserHome}/Teams_Old_Backgrounds"
+    local installAttempt=1
+    local installationRetries=5
     osVersion="$(sw_vers -productVersion)"
 
+    pkill -9 'MSTeams' 2>/dev/null
+    pkill -9 'Microsoft Teams' 2>/dev/null
+    pkill -9 'Microsoft Teams Helper' 2>/dev/null
+    pkill -9 'Microsoft Teams WebView' 2>/dev/null
+    pkill -9 'Microsoft Teams Launcher' 2>/dev/null
+    pkill -9 'Microsoft Teams (work preview)' 2>/dev/null
     pkill -9 'Microsoft Teams*' 2>/dev/null
 
-    if [[ -d "/Applications/Microsoft Teams.app" ]]; then
-        local version bundle
-        version="$(defaults read /Applications/Microsoft\ Teams.app/Contents/Info.plist CFBundleVersion 2>/dev/null)"
-        bundle="$(defaults read /Applications/Microsoft\ Teams.app/Contents/Info.plist CFBundleIdentifier 2>/dev/null)"
-        if [[ "${bundle}" == "com.microsoft.teams" ]] && ! is-at-least 611156.0 "${version}" && is-at-least 10.15 "${osVersion}"; then
-            repairFromMicrosoftPkg "Microsoft Teams" "https://go.microsoft.com/fwlink/?linkid=869428" "" || return 1
+    if [[ -d "${teamsAppPath}" ]]; then
+        local currentTeamsVersion
+        currentTeamsVersion="$(defaults read "${teamsAppPath}/Contents/Info.plist" CFBundleVersion 2>/dev/null)"
+        info "Found Microsoft Teams version ${currentTeamsVersion}"
+        if [[ "${forceReinstall}" == "true" ]]; then
+            info "Force reinstall requested for Microsoft Teams; removing existing app bundle"
+            safeRemove "${teamsAppPath}"
+        elif ! is-at-least 23247.0 "${currentTeamsVersion}" && is-at-least 10.15 "${osVersion}"; then
+            info "Installed Microsoft Teams is below MOFA minimum; removing for reinstall"
+            safeRemove "${teamsAppPath}"
         fi
     fi
 
-    if [[ -d "/Applications/Microsoft Teams classic.app" ]]; then
-        local version bundle
-        version="$(defaults read /Applications/Microsoft\ Teams\ classic.app/Contents/Info.plist CFBundleVersion 2>/dev/null)"
-        bundle="$(defaults read /Applications/Microsoft\ Teams\ classic.app/Contents/Info.plist CFBundleIdentifier 2>/dev/null)"
-        if ! is-at-least 627656.0 "${version}" && is-at-least 10.15 "${osVersion}"; then
-            repairFromMicrosoftPkg "Microsoft Teams" "https://go.microsoft.com/fwlink/?linkid=869428" "" || return 1
-        fi
+    [[ -d "${classicTeamsPath}" ]] && safeRemove "${classicTeamsPath}"
+    [[ -d "${workOrSchoolTeamsPath}" ]] && safeRemove "${workOrSchoolTeamsPath}"
 
-        /usr/bin/codesign -vv --deep /Applications/Microsoft\ Teams\ classic.app >>"${scriptLog}" 2>&1
-        if [[ $? -ne 0 ]]; then
-            safeRemove "/Applications/Microsoft Teams classic.app"
-            repairFromMicrosoftPkg "Microsoft Teams" "https://go.microsoft.com/fwlink/?linkid=869428" "" || return 1
+    if [[ -d "${classicBackgroundsPath}" ]]; then
+        local originalArchivePath="${teamsBackgroundArchive}"
+        local archiveCounter=0
+        while [[ -e "${teamsBackgroundArchive}" ]]; do
+            ((archiveCounter++))
+            teamsBackgroundArchive="${originalArchivePath}${archiveCounter}"
+        done
+        /bin/mv "${classicBackgroundsPath}" "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1
+        /usr/sbin/chown -R "${loggedInUser}" "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1
+        if [[ "${operationMode}" != "silent" ]]; then
+            runAsUser "${loggedInUser}" /usr/bin/open "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1
         fi
     fi
 
-    if [[ -d "/Applications/Microsoft Teams (work or school).app" ]]; then
-        local version
-        version="$(defaults read /Applications/Microsoft\ Teams\ \(work\ or\ school\).app/Contents/Info.plist CFBundleVersion 2>/dev/null)"
-        if ! is-at-least 23247.0 "${version}" && is-at-least 10.15 "${osVersion}"; then
-            repairFromMicrosoftPkg "Microsoft Teams" "https://go.microsoft.com/fwlink/?linkid=2249065" "" || return 1
-        fi
-
-        /usr/bin/codesign -vv --deep /Applications/Microsoft\ Teams\ \(work\ or\ school\).app >>"${scriptLog}" 2>&1
-        if [[ $? -ne 0 ]]; then
-            safeRemove "/Applications/Microsoft Teams (work or school).app"
-            repairFromMicrosoftPkg "Microsoft Teams" "https://go.microsoft.com/fwlink/?linkid=2249065" "" || return 1
-        fi
+    if [[ -d "${modernBackgroundsPath}" ]]; then
+        [[ -e "${modernBackgroundsStaging}" ]] && rm -rf "${modernBackgroundsStaging}" >>"${scriptLog}" 2>&1
+        /bin/mv "${modernBackgroundsPath}" "${modernBackgroundsStaging}" >>"${scriptLog}" 2>&1
     fi
 
     safeRemove "${loggedInUserHome}/Library/Application Support/Teams"
@@ -1661,6 +1849,7 @@ function op_reset_teams() {
     safeRemove "${TMPDIR}/v8-compile-cache-501"
 
     safeRemove "/Library/Logs/Microsoft/Teams"
+    /usr/bin/tccutil reset All com.microsoft.teams2 >>"${scriptLog}" 2>&1
 
     ensureLoginKeychainPresent "${loggedInUser}" "${loggedInUserHome}"
 
@@ -1672,11 +1861,64 @@ function op_reset_teams() {
     deleteGenericByLabel 'com.microsoft.teams.HockeySDK' "${loggedInUser}"
     deleteGenericByLabel 'com.microsoft.teams.helper.HockeySDK' "${loggedInUser}"
 
+    if [[ -d "${modernBackgroundsStaging}" ]]; then
+        /bin/mkdir -p "$(dirname "${modernBackgroundsPath}")" >>"${scriptLog}" 2>&1
+        /bin/mv "${modernBackgroundsStaging}" "${modernBackgroundsPath}" >>"${scriptLog}" 2>&1
+        /usr/sbin/chown -R "${loggedInUser}" "$(dirname "${modernBackgroundsPath}")" >>"${scriptLog}" 2>&1
+    fi
+
+    if [[ -d "${teamsAppPath}" ]]; then
+        /usr/bin/codesign -vv --deep "${teamsAppPath}" >>"${scriptLog}" 2>&1
+        if [[ $? -ne 0 ]]; then
+            warning "Microsoft Teams app bundle damaged; reinstalling"
+            safeRemove "${teamsAppPath}"
+        else
+            info "Microsoft Teams codesign verification passed"
+        fi
+    fi
+
+    while [[ ! -d "${teamsAppPath}" && ${installAttempt} -le ${installationRetries} ]]; do
+        info "Installing Microsoft Teams (attempt ${installAttempt}/${installationRetries})"
+        repairFromMicrosoftPkg "Microsoft Teams" "https://go.microsoft.com/fwlink/?linkid=2249065" "" || return 1
+        /usr/bin/codesign -vv --deep "${teamsAppPath}" >>"${scriptLog}" 2>&1
+        if [[ $? -eq 0 ]]; then
+            local installedTeamsVersion
+            installedTeamsVersion="$(defaults read "${teamsAppPath}/Contents/Info.plist" CFBundleVersion 2>/dev/null)"
+            info "Microsoft Teams installed successfully at version ${installedTeamsVersion}"
+            break
+        fi
+        warning "Microsoft Teams app bundle failed codesign after install attempt ${installAttempt}; removing and retrying"
+        safeRemove "${teamsAppPath}"
+        ((installAttempt++))
+    done
+
+    if [[ ! -d "${teamsAppPath}" ]]; then
+        errorOut "Unable to install a valid Microsoft Teams app bundle"
+        return 1
+    fi
+
+    if [[ "${operationMode}" != "silent" ]]; then
+        runAsUser "${loggedInUser}" /usr/bin/open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture" >>"${scriptLog}" 2>&1 || warning "Unable to open Screen Recording settings for Microsoft Teams"
+    fi
+
+    return 0
+}
+
+function op_reset_teams() {
+    info "Starting operation: reset_teams"
+    resetTeamsOperation "false" || return 1
+    return 0
+}
+
+function op_reset_teams_force() {
+    info "Starting operation: reset_teams_force"
+    resetTeamsOperation "true" || return 1
     return 0
 }
 
 function op_reset_autoupdate() {
     info "Starting operation: reset_autoupdate"
+    local mauAppPath="/Library/Application Support/Microsoft/MAU2.0/Microsoft AutoUpdate.app"
 
     pkill -9 'Microsoft AutoUpdate' 2>/dev/null
     pkill -9 'Microsoft Update Assistant' 2>/dev/null
@@ -1709,7 +1951,9 @@ function op_reset_autoupdate() {
     safeRemove "${loggedInUserHome}/Library/Caches/com.microsoft.autoupdate.fba"
 
     safeRemove "${loggedInUserHome}/Library/HTTPStorages/com.microsoft.autoupdate2"
+    safeRemove "${loggedInUserHome}/Library/HTTPStorages/com.microsoft.autoupdate2.binarycookies"
     safeRemove "${loggedInUserHome}/Library/HTTPStorages/com.microsoft.autoupdate.fba"
+    safeRemove "${loggedInUserHome}/Library/HTTPStorages/com.microsoft.autoupdate.fba.binarycookies"
 
     safeRemove "${loggedInUserHome}/Library/Application Support/Microsoft AU Daemon"
 
@@ -1731,11 +1975,22 @@ function op_reset_autoupdate() {
 
     defaults write /Library/Preferences/com.microsoft.autoupdate2 AcknowledgedDataCollectionPolicy -string 'RequiredDataOnly' >>"${scriptLog}" 2>&1
 
-    if [[ -d "/Library/Application Support/Microsoft/MAU2.0/Microsoft AutoUpdate.app" ]]; then
-        repairFromMicrosoftPkg "Microsoft AutoUpdate" "https://go.microsoft.com/fwlink/?linkid=830196" "" || return 1
+    if [[ -d "${mauAppPath}" ]]; then
+        local mauVersion
+        mauVersion="$(defaults read "${mauAppPath}/Contents/Info.plist" CFBundleVersion 2>/dev/null)"
+        if ! is-at-least 4.49 "${mauVersion}"; then
+            info "Microsoft AutoUpdate is below MOFA minimum; repairing"
+            repairFromMicrosoftPkg "Microsoft AutoUpdate" "https://go.microsoft.com/fwlink/?linkid=830196" "" || return 1
+        fi
+        /usr/bin/codesign -vv --deep "${mauAppPath}" >>"${scriptLog}" 2>&1
+        if [[ $? -ne 0 ]]; then
+            warning "Microsoft AutoUpdate app bundle damaged; reinstalling"
+            safeRemove "${mauAppPath}"
+            repairFromMicrosoftPkg "Microsoft AutoUpdate" "https://go.microsoft.com/fwlink/?linkid=830196" "" || return 1
+        fi
     fi
 
-    defaults write /Library/Preferences/com.microsoft.autoupdate2 ApplicationsSystem -dict-add "/Library/Application Support/Microsoft/MAU2.0/Microsoft AutoUpdate.app" "{ 'Application ID' = 'MSau04'; LCID = 1033 ; 'App Domain' = 'com.microsoft.office' ; }" >>"${scriptLog}" 2>&1
+    defaults write /Library/Preferences/com.microsoft.autoupdate2 ApplicationsSystem -dict-add "${mauAppPath}" "{ 'Application ID' = 'MSau04'; LCID = 1033 ; 'App Domain' = 'com.microsoft.office' ; }" >>"${scriptLog}" 2>&1
 
     registerMAUApplicationIfPresent "/Applications/Microsoft Word.app" "MSWD2019" "MSWD15"
     registerMAUApplicationIfPresent "/Applications/Microsoft Excel.app" "XCEL2019" "XCEL15"
@@ -1743,18 +1998,22 @@ function op_reset_autoupdate() {
     registerMAUApplicationIfPresent "/Applications/Microsoft Outlook.app" "OPIM2019" "OPIM15"
     registerMAUApplicationIfPresent "/Applications/Microsoft OneNote.app" "ONMC2019" "ONMC15"
 
-    [[ -d "/Applications/OneDrive.app" ]] && defaults write /Library/Preferences/com.microsoft.autoupdate2 ApplicationsSystem -dict-add "/Applications/OneDrive.app" "{ 'Application ID' = 'ONDR18'; LCID = 1033 ; 'App Domain' = 'com.microsoft.office' ; }" >>"${scriptLog}" 2>&1
-    [[ -d "/Applications/Microsoft Teams classic.app" ]] && defaults write /Library/Preferences/com.microsoft.autoupdate2 ApplicationsSystem -dict-add "/Applications/Microsoft Teams classic.app" "{ 'Application ID' = 'TEAMS10'; LCID = 1033 ; }" >>"${scriptLog}" 2>&1
-    [[ -d "/Applications/Microsoft Remote Desktop.app" ]] && defaults write /Library/Preferences/com.microsoft.autoupdate2 ApplicationsSystem -dict-add "/Applications/Microsoft Remote Desktop.app" "{ 'Application ID' = 'MSRD10'; LCID = 1033 ; }" >>"${scriptLog}" 2>&1
-    [[ -d "/Applications/Skype For Business.app" ]] && defaults write /Library/Preferences/com.microsoft.autoupdate2 ApplicationsSystem -dict-add "/Applications/Skype For Business.app" "{ 'Application ID' = 'MSFB16'; LCID = 1033 ; }" >>"${scriptLog}" 2>&1
-    [[ -d "/Applications/Company Portal.app" ]] && defaults write /Library/Preferences/com.microsoft.autoupdate2 ApplicationsSystem -dict-add "/Applications/Company Portal.app" "{ 'Application ID' = 'IMCP01'; LCID = 1033 ; }" >>"${scriptLog}" 2>&1
+    registerMAUStaticApplicationIfPresent "/Applications/OneDrive.app" "{ 'Application ID' = 'ONDR18'; LCID = 1033 ; 'App Domain' = 'com.microsoft.office' ; }"
+    registerMAUStaticApplicationIfPresent "/Applications/Microsoft Teams.app" "{ 'Application ID' = 'TEAMS21'; LCID = 1033 ; 'App Domain' = 'com.microsoft.office' ; }"
+    registerMAUStaticApplicationIfPresent "/Applications/Microsoft Teams classic.app" "{ 'Application ID' = 'TEAMS10'; LCID = 1033 ; }"
+    registerMAUStaticApplicationIfPresent "/Applications/Microsoft Edge.app" "{ 'Application ID' = 'EDGE01'; LCID = 1033 ; }"
+    registerMAUStaticApplicationIfPresent "/Applications/Microsoft Edge Beta.app" "{ 'Application ID' = 'EDBT01'; LCID = 1033 ; }"
+    registerMAUStaticApplicationIfPresent "/Applications/Microsoft Edge Canary.app" "{ 'Application ID' = 'EDCN01'; LCID = 1033 ; }"
+    registerMAUStaticApplicationIfPresent "/Applications/Microsoft Edge Dev.app" "{ 'Application ID' = 'EDDV01'; LCID = 1033 ; }"
+    registerMAUStaticApplicationIfPresent "/Applications/Microsoft Remote Desktop.app" "{ 'Application ID' = 'MSRD10'; LCID = 1033 ; }"
+    registerMAUStaticApplicationIfPresent "/Applications/Skype For Business.app" "{ 'Application ID' = 'MSFB16'; LCID = 1033 ; }"
+    registerMAUStaticApplicationIfPresent "/Applications/Company Portal.app" "{ 'Application ID' = 'IMCP01'; LCID = 1033 ; }"
+    registerMAUStaticApplicationIfPresent "/Applications/Microsoft Defender ATP.app" "{ 'Application ID' = 'WDAV00'; LCID = 1033 ; }"
 
     return 0
 }
 
-function op_reset_credentials() {
-    info "Starting operation: reset_credentials"
-
+function resetOfficeLicenseCore() {
     pkill -HUP 'Microsoft Word' 2>/dev/null
     pkill -HUP 'Microsoft Excel' 2>/dev/null
     pkill -HUP 'Microsoft PowerPoint' 2>/dev/null
@@ -1774,7 +2033,6 @@ function op_reset_credentials() {
     deleteGenericByLabel 'Microsoft Office Identities Settings 2' "${loggedInUser}"
     deleteGenericByLabel 'Microsoft Office Identities Settings 3' "${loggedInUser}"
     deleteGenericByLabel 'Microsoft Office Ticket Cache' "${loggedInUser}"
-    deleteGenericByLabel 'Microsoft Office Ticket Cache 2' "${loggedInUser}"
     deleteGenericByLabel 'com.microsoft.adalcache' "${loggedInUser}"
 
     deleteGenericByCreatorLoop 'Microsoft Office Data' "${loggedInUser}"
@@ -1785,23 +2043,6 @@ function op_reset_credentials() {
     deleteGenericByLabelLoop 'MicrosoftOfficeRMSCredential' "${loggedInUser}"
     deleteGenericByLabelLoop 'MSProtection.framework.service' "${loggedInUser}"
     deleteGenericByLabelLoop 'Exchange' "${loggedInUser}"
-
-    deleteGenericByLabelLoop 'Microsoft Teams Identities Cache' "${loggedInUser}"
-    deleteGenericByLabel 'Teams Safe Storage' "${loggedInUser}"
-    deleteGenericByLabel 'Microsoft Teams (work or school) Safe Storage' "${loggedInUser}"
-    deleteGenericByLabel 'teamsIv' "${loggedInUser}"
-    deleteGenericByLabel 'teamsKey' "${loggedInUser}"
-    deleteGenericByLabel 'com.microsoft.teams.HockeySDK' "${loggedInUser}"
-    deleteGenericByLabel 'com.microsoft.teams.helper.HockeySDK' "${loggedInUser}"
-
-    deleteGenericByLabel 'com.microsoft.OneDrive.FinderSync.HockeySDK' "${loggedInUser}"
-    deleteGenericByLabel 'com.microsoft.OneDrive.HockeySDK' "${loggedInUser}"
-    deleteGenericByLabel 'com.microsoft.OneDriveUpdater.HockeySDK' "${loggedInUser}"
-    deleteGenericByLabel 'com.microsoft.OneDriveStandaloneUpdater.HockeySDK' "${loggedInUser}"
-    deleteGenericByLabel 'OneDrive Standalone Cached Credential Business - Business1' "${loggedInUser}"
-    deleteGenericByLabel 'OneDrive Standalone Cached Credential' "${loggedInUser}"
-    deleteGenericByService 'com.microsoft.onedrive.cookies' "${loggedInUser}"
-    deleteGenericByService 'OneAuthAccount' "${loggedInUser}"
 
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/mip_policy"
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/DRM_Evo.plist"
@@ -1835,8 +2076,6 @@ function op_reset_credentials() {
     safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.Outlook/Data/Library/Application Support/Microsoft"
     safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.onenote.mac/Data/Library/Application Support/Microsoft"
 
-    safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.msa-login-hint.plist"
-
     if [[ -e "${loggedInUserHome}/Library/Preferences/com.microsoft.office.plist" ]]; then
         runAsUser "${loggedInUser}" defaults delete "${loggedInUserHome}/Library/Preferences/com.microsoft.office" OfficeActivationEmailAddress >>"${scriptLog}" 2>&1
         runAsUser "${loggedInUser}" defaults write "${loggedInUserHome}/Library/Preferences/com.microsoft.office" OfficeAutoSignIn -bool TRUE >>"${scriptLog}" 2>&1
@@ -1850,6 +2089,31 @@ function op_reset_credentials() {
     [[ -d "${loggedInUserHome}/Library/Containers/com.microsoft.Outlook/Data/Library/Preferences" ]] && runAsUser "${loggedInUser}" defaults write "${loggedInUserHome}/Library/Containers/com.microsoft.Outlook/Data/Library/Preferences/com.microsoft.Outlook" kSubUIAppCompletedFirstRunSetup1507 -bool FALSE >>"${scriptLog}" 2>&1
     [[ -d "${loggedInUserHome}/Library/Containers/com.microsoft.onenote.mac/Data/Library/Preferences" ]] && runAsUser "${loggedInUser}" defaults write "${loggedInUserHome}/Library/Containers/com.microsoft.onenote.mac/Data/Library/Preferences/com.microsoft.onenote.mac" kSubUIAppCompletedFirstRunSetup1507 -bool FALSE >>"${scriptLog}" 2>&1
 
+    safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/MicrosoftRegistrationDB.reg"
+    return 0
+}
+
+function resetOfficeExtendedSignInArtifacts() {
+    deleteGenericByLabel 'Microsoft Office Ticket Cache 2' "${loggedInUser}"
+
+    deleteGenericByLabelLoop 'Microsoft Teams Identities Cache' "${loggedInUser}"
+    deleteGenericByLabel 'Teams Safe Storage' "${loggedInUser}"
+    deleteGenericByLabel 'Microsoft Teams (work or school) Safe Storage' "${loggedInUser}"
+    deleteGenericByLabel 'teamsIv' "${loggedInUser}"
+    deleteGenericByLabel 'teamsKey' "${loggedInUser}"
+    deleteGenericByLabel 'com.microsoft.teams.HockeySDK' "${loggedInUser}"
+    deleteGenericByLabel 'com.microsoft.teams.helper.HockeySDK' "${loggedInUser}"
+
+    deleteGenericByLabel 'com.microsoft.OneDrive.FinderSync.HockeySDK' "${loggedInUser}"
+    deleteGenericByLabel 'com.microsoft.OneDrive.HockeySDK' "${loggedInUser}"
+    deleteGenericByLabel 'com.microsoft.OneDriveUpdater.HockeySDK' "${loggedInUser}"
+    deleteGenericByLabel 'com.microsoft.OneDriveStandaloneUpdater.HockeySDK' "${loggedInUser}"
+    deleteGenericByLabel 'OneDrive Standalone Cached Credential Business - Business1' "${loggedInUser}"
+    deleteGenericByLabel 'OneDrive Standalone Cached Credential' "${loggedInUser}"
+    deleteGenericByService 'com.microsoft.onedrive.cookies' "${loggedInUser}"
+
+    safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.msa-login-hint.plist"
+
     local keychainDB
     keychainDB="$(findKeychainDB "${loggedInUserHome}")"
     if [[ -n "${keychainDB}" ]]; then
@@ -1857,10 +2121,26 @@ function op_reset_credentials() {
     fi
 
     safeRemove "${loggedInUserHome}/Library/Keychains/Microsoft_Entity_Certificates-db"
-    safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/MicrosoftRegistrationDB.reg"
+    return 0
+}
 
+function finalizeOfficeCredentialReset() {
     /usr/bin/killall cfprefsd >>"${scriptLog}" 2>&1
+    return 0
+}
 
+function op_reset_license() {
+    info "Starting operation: reset_license"
+    resetOfficeLicenseCore || return 1
+    finalizeOfficeCredentialReset || return 1
+    return 0
+}
+
+function op_reset_credentials() {
+    info "Starting operation: reset_credentials"
+    resetOfficeLicenseCore || return 1
+    resetOfficeExtendedSignInArtifacts || return 1
+    finalizeOfficeCredentialReset || return 1
     return 0
 }
 
@@ -2006,7 +2286,9 @@ function runOperation() {
         remove_onenote_data) op_remove_onenote_data ;;
         reset_onedrive) op_reset_onedrive ;;
         reset_teams) op_reset_teams ;;
+        reset_teams_force) op_reset_teams_force ;;
         reset_autoupdate) op_reset_autoupdate ;;
+        reset_license) op_reset_license ;;
         reset_credentials) op_reset_credentials ;;
         remove_office) op_remove_office ;;
         remove_skypeforbusiness) op_remove_skypeforbusiness ;;
@@ -2025,7 +2307,7 @@ function sortOperationsByExecutionPhase() {
     local op
 
     # reset operations
-    for op in reset_factory reset_word reset_excel reset_powerpoint reset_outlook reset_onenote reset_onedrive reset_teams reset_autoupdate reset_credentials; do
+    for op in reset_factory reset_word reset_excel reset_powerpoint reset_outlook reset_onenote reset_onedrive reset_teams reset_teams_force reset_autoupdate reset_license reset_credentials; do
         isOperationSelected "${op}" && sorted+=("${op}")
     done
 
@@ -2131,6 +2413,8 @@ function main() {
             showCompletionDialog
             exit 20
         fi
+
+        updateCompletedProgressDialog "${index}" "${total}" "Completed remove_office preinstall (${index}/${total})"
     fi
 
     local op
@@ -2145,6 +2429,8 @@ function main() {
             appendFailure "${op}"
             errorOut "Operation failed: ${op}"
         fi
+
+        updateCompletedProgressDialog "${index}" "${total}" "Completed ${op} (${index}/${total})"
     done
 
     finishProgressDialog
