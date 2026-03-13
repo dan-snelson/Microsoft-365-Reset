@@ -10,7 +10,7 @@
 - Updated app reset flows to stop after repair/reinstall instead of continuing with configuration cleanup
 - Added `reset_license` to preserve MOFA's license-only reset workflow alongside `reset_credentials`
 - Added `reset_teams_force` to provide a Teams force-reinstall path within the unified operation model
-- Updated Teams reset to preserve custom backgrounds, reset Teams TCC state, and reopen Screen Recording settings in interactive modes
+- Updated Teams reset to preserve custom backgrounds, reset Teams TCC state in the logged-in user context, preserve installed app bundles outside force-reinstall mode, and reopen Screen Recording settings in interactive modes
 - Expanded AutoUpdate registration to include current Teams, Edge channels, and Defender ATP when present
 - Fixed Microsoft package header parsing so `reset_teams_force` can validate CDN downloads correctly
 - Updated progress bar behavior so a running operation no longer appears complete before it finishes

@@ -1753,12 +1753,14 @@ function resetTeamsOperation() {
     local teamsAppPath="/Applications/Microsoft Teams.app"
     local classicTeamsPath="/Applications/Microsoft Teams classic.app"
     local workOrSchoolTeamsPath="/Applications/Microsoft Teams (work or school).app"
+    local teamsPkgURL="https://go.microsoft.com/fwlink/?linkid=2249065"
     local classicBackgroundsPath="${loggedInUserHome}/Library/Application Support/Microsoft/Teams/Backgrounds"
     local modernBackgroundsPath="${loggedInUserHome}/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/Backgrounds"
     local modernBackgroundsStaging="/tmp/${scriptName}_Teams_Backgrounds"
     local teamsBackgroundArchive="${loggedInUserHome}/Teams_Old_Backgrounds"
     local installAttempt=1
     local installationRetries=5
+    local shouldInstallTeams="false"
     osVersion="$(sw_vers -productVersion)"
 
     pkill -9 'MSTeams' 2>/dev/null
@@ -1776,14 +1778,25 @@ function resetTeamsOperation() {
         if [[ "${forceReinstall}" == "true" ]]; then
             info "Force reinstall requested for Microsoft Teams; removing existing app bundle"
             safeRemove "${teamsAppPath}"
+            shouldInstallTeams="true"
         elif ! is-at-least 23247.0 "${currentTeamsVersion}" && is-at-least 10.15 "${osVersion}"; then
             info "Installed Microsoft Teams is below MOFA minimum; removing for reinstall"
             safeRemove "${teamsAppPath}"
+            shouldInstallTeams="true"
         fi
     fi
 
-    [[ -d "${classicTeamsPath}" ]] && safeRemove "${classicTeamsPath}"
-    [[ -d "${workOrSchoolTeamsPath}" ]] && safeRemove "${workOrSchoolTeamsPath}"
+    if [[ "${forceReinstall}" == "true" && -d "${classicTeamsPath}" ]]; then
+        info "Force reinstall requested for Microsoft Teams; removing classic Teams app bundle"
+        safeRemove "${classicTeamsPath}"
+        shouldInstallTeams="true"
+    fi
+
+    if [[ "${forceReinstall}" == "true" && -d "${workOrSchoolTeamsPath}" ]]; then
+        info "Force reinstall requested for Microsoft Teams; removing Teams work-or-school app bundle"
+        safeRemove "${workOrSchoolTeamsPath}"
+        shouldInstallTeams="true"
+    fi
 
     if [[ -d "${classicBackgroundsPath}" ]]; then
         local originalArchivePath="${teamsBackgroundArchive}"
@@ -1849,7 +1862,9 @@ function resetTeamsOperation() {
     safeRemove "${TMPDIR}/v8-compile-cache-501"
 
     safeRemove "/Library/Logs/Microsoft/Teams"
-    /usr/bin/tccutil reset All com.microsoft.teams2 >>"${scriptLog}" 2>&1
+    if ! runAsUser "${loggedInUser}" /usr/bin/tccutil reset All com.microsoft.teams2 >>"${scriptLog}" 2>&1; then
+        warning "Unable to reset Teams TCC state for ${loggedInUser}"
+    fi
 
     ensureLoginKeychainPresent "${loggedInUser}" "${loggedInUserHome}"
 
@@ -1872,14 +1887,15 @@ function resetTeamsOperation() {
         if [[ $? -ne 0 ]]; then
             warning "Microsoft Teams app bundle damaged; reinstalling"
             safeRemove "${teamsAppPath}"
+            shouldInstallTeams="true"
         else
             info "Microsoft Teams codesign verification passed"
         fi
     fi
 
-    while [[ ! -d "${teamsAppPath}" && ${installAttempt} -le ${installationRetries} ]]; do
+    while [[ "${shouldInstallTeams}" == "true" && ! -d "${teamsAppPath}" && ${installAttempt} -le ${installationRetries} ]]; do
         info "Installing Microsoft Teams (attempt ${installAttempt}/${installationRetries})"
-        repairFromMicrosoftPkg "Microsoft Teams" "https://go.microsoft.com/fwlink/?linkid=2249065" "" || return 1
+        repairFromMicrosoftPkg "Microsoft Teams" "${teamsPkgURL}" "" || return 1
         /usr/bin/codesign -vv --deep "${teamsAppPath}" >>"${scriptLog}" 2>&1
         if [[ $? -eq 0 ]]; then
             local installedTeamsVersion
@@ -1892,7 +1908,7 @@ function resetTeamsOperation() {
         ((installAttempt++))
     done
 
-    if [[ ! -d "${teamsAppPath}" ]]; then
+    if [[ "${shouldInstallTeams}" == "true" && ! -d "${teamsAppPath}" ]]; then
         errorOut "Unable to install a valid Microsoft Teams app bundle"
         return 1
     fi
@@ -2008,6 +2024,7 @@ function op_reset_autoupdate() {
     registerMAUStaticApplicationIfPresent "/Applications/Microsoft Remote Desktop.app" "{ 'Application ID' = 'MSRD10'; LCID = 1033 ; }"
     registerMAUStaticApplicationIfPresent "/Applications/Skype For Business.app" "{ 'Application ID' = 'MSFB16'; LCID = 1033 ; }"
     registerMAUStaticApplicationIfPresent "/Applications/Company Portal.app" "{ 'Application ID' = 'IMCP01'; LCID = 1033 ; }"
+    registerMAUStaticApplicationIfPresent "/Applications/Microsoft Defender.app" "{ 'Application ID' = 'WDAV00'; LCID = 1033 ; }"
     registerMAUStaticApplicationIfPresent "/Applications/Microsoft Defender ATP.app" "{ 'Application ID' = 'WDAV00'; LCID = 1033 ; }"
 
     return 0

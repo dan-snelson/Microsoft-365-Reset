@@ -25,6 +25,7 @@ The script consolidates expanded package workflows into one root-run tool with:
 - `reset_factory` performs its own MOFA-style suite cleanup in addition to dependency expansion
 - App repair/reinstall flows for Word, Excel, PowerPoint, Outlook, and OneNote now stop after repair instead of continuing with configuration cleanup in the same run
 - `reset_teams` preserves Teams backgrounds, resets Teams TCC state, and opens Screen Recording settings in interactive modes
+- `reset_teams` preserves installed Teams app bundles unless repair is required; `reset_teams_force` performs the explicit app removal and reinstall path
 - Teams reset and AutoUpdate registration now treat new Teams as the current `TEAMS21` product while keeping classic Teams on the legacy product ID
 - Separate `reset_license` and `reset_credentials` operations cover MOFA's split between license-only and broader sign-in reset flows
 - `reset_teams_force` provides a force-reinstall path for Teams without adding a new CLI parameter
@@ -100,7 +101,7 @@ Use these IDs in `--operations` CSV:
 | `reset_onenote` | OneNote repair checks + container/group cleanup |
 | `remove_onenote_data` | Remove OneNote cached local data |
 | `reset_onedrive` | OneDrive repair checks + cache/container/keychain cleanup |
-| `reset_teams` | Teams classic/new checks + Teams cache/container/keychain cleanup |
+| `reset_teams` | Teams reset with app validation/repair when needed + Teams cache/container/keychain cleanup |
 | `reset_teams_force` | Force-remove and reinstall Teams, then perform Teams cache/container/keychain cleanup |
 | `reset_autoupdate` | Reset MAU prefs/cache and reinstall/update MAU when applicable |
 | `reset_license` | Reset Office licensing files and core Office identity data |
@@ -153,6 +154,7 @@ The following operations include app repair checks and may download/reinstall fr
 - `reset_onenote`
 - `reset_onedrive`
 - `reset_teams`
+- `reset_teams_force`
 - `reset_autoupdate`
 
 Repair pipeline includes:
