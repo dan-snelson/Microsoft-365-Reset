@@ -1,4 +1,4 @@
-# Microsoft 365 Reset (0.0.1a2)
+# Microsoft 365 Reset (0.0.1a3)
 
 ![Microsoft 365 Reset](images/Microsoft_365_Reset.png)
 
@@ -75,7 +75,7 @@ The script also reads Jamf-style parameters:
 | `$4` | mode |
 | `$5` | operations CSV |
 
-CLI flags override these values when both are present.
+CLI flags (`--mode`, `--operations`) override these values when both are present. The parser tolerates up to five leading positional arguments for Jamf-style execution before the first CLI flag, which covers Jamf's `$1-$3` placeholders plus `$4`/`$5`. Unexpected bare positional arguments after a CLI flag still fail validation.
 
 ## Modes
 
@@ -191,6 +191,12 @@ Jamf-style invocation example:
 
 ```bash
 sudo ./Microsoft-365-Reset.zsh "" "" "" "silent" "reset_autoupdate,reset_credentials"
+```
+
+Jamf-style invocation with CLI override example:
+
+```bash
+sudo ./Microsoft-365-Reset.zsh "" "" "" "self-service" "" --mode silent --operations reset_autoupdate,reset_credentials
 ```
 
 ## Exit Codes

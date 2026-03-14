@@ -14,6 +14,9 @@
 #
 # HISTORY
 #
+# Version 0.0.1a3, 14-Mar-2026, Dan K. Snelson
+#   - Fixed argument parsing so Jamf-style leading positional parameters no longer trigger `Unknown argument` before CLI flags are processed (Addresses [Issue #3](https://github.com/dan-snelson/Microsoft-365-Reset/issues/3); thanks for the heads-up, @eirikt!)
+#
 # Version 0.0.1a2, 13-Mar-2026, Dan K. Snelson
 #   - Aligned cleanup targets with MOFA community-maintained reset scripts
 #   - Added MOFA-style factory reset cleanup and Teams reset behavior
@@ -37,7 +40,7 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin/
 setopt NONOMATCH
 
 # Script identity
-scriptVersion="0.0.1a2"
+scriptVersion="0.0.1a3"
 humanReadableScriptName="Microsoft 365 Reset"
 scriptName="M365R"
 
@@ -60,10 +63,13 @@ operationCSV="${5:-}"
 scriptLog="/var/log/org.churchofjesuschrist.log"
 restartMode="Restart Confirm"
 
-# CLI flags override Jamf parameters
+# CLI flags override Jamf parameters; tolerate only the leading Jamf-style positional window
+leadingPositionalCount=0
+seenCLIFlag="false"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --mode)
+            seenCLIFlag="true"
             if [[ -z "${2:-}" || "${2}" == -* ]]; then
                 echo "Missing or invalid value for --mode. Usage: $0 [--mode MODE] [--operations CSV]"
                 exit 10
@@ -72,6 +78,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --operations)
+            seenCLIFlag="true"
             if [[ -z "${2:-}" || "${2}" == -* ]]; then
                 echo "Missing or invalid value for --operations. Usage: $0 [--mode MODE] [--operations CSV]"
                 exit 10
@@ -79,7 +86,16 @@ while [[ $# -gt 0 ]]; do
             operationCSV="$2"
             shift 2
             ;;
+        --*)
+            echo "Unknown argument: $1"
+            exit 10
+            ;;
         *)
+            if [[ "${seenCLIFlag}" == "false" && ${leadingPositionalCount} -lt 5 ]]; then
+                ((leadingPositionalCount++))
+                shift
+                continue
+            fi
             echo "Unknown argument: $1"
             exit 10
             ;;

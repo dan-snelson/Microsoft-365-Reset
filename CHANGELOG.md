@@ -2,6 +2,9 @@
 
 ## Changelog
 
+### Version 0.0.1a3 (14-Mar-2026)
+- Fixed argument parsing so Jamf-style leading positional parameters no longer trigger `Unknown argument` before CLI flags are processed (Addresses [Issue #3](https://github.com/dan-snelson/Microsoft-365-Reset/issues/3); thanks for the heads-up, @eirikt!)
+
 ### Version 0.0.1a2 (13-Mar-2026)
 - Aligned cleanup targets with MOFA community-maintained reset scripts
 - Added OneDrive integration cleanup targets to the full Microsoft 365 removal workflow
