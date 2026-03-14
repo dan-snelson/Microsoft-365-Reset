@@ -14,6 +14,9 @@
 #
 # HISTORY
 #
+# Version 0.0.1a3, 14-Mar-2026, Dan K. Snelson
+#   - Fixed argument parsing so Jamf Pro's leading positional parameters (`$1`–`$3`) no longer trigger `Unknown argument` (Addresses [Issue #3](https://github.com/dan-snelson/Microsoft-365-Reset/issues/3); thanks for the heads-up, @eirikt!)
+#
 # Version 0.0.1a2, 13-Mar-2026, Dan K. Snelson
 #   - Aligned cleanup targets with MOFA community-maintained reset scripts
 #   - Added MOFA-style factory reset cleanup and Teams reset behavior
@@ -37,7 +40,7 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin/
 setopt NONOMATCH
 
 # Script identity
-scriptVersion="0.0.1a2"
+scriptVersion="0.0.1a3"
 humanReadableScriptName="Microsoft 365 Reset"
 scriptName="M365R"
 
@@ -60,7 +63,7 @@ operationCSV="${5:-}"
 scriptLog="/var/log/org.churchofjesuschrist.log"
 restartMode="Restart Confirm"
 
-# CLI flags override Jamf parameters
+# CLI flags override Jamf parameters; non-flag positionals (e.g., Jamf's $1-$3) are silently skipped
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --mode)
@@ -79,9 +82,12 @@ while [[ $# -gt 0 ]]; do
             operationCSV="$2"
             shift 2
             ;;
-        *)
+        --*)
             echo "Unknown argument: $1"
             exit 10
+            ;;
+        *)
+            shift
             ;;
     esac
 done
