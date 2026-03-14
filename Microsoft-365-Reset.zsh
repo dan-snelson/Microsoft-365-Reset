@@ -15,7 +15,7 @@
 # HISTORY
 #
 # Version 0.0.1a3, 14-Mar-2026, Dan K. Snelson
-#   - Fixed argument parsing so Jamf Pro's leading positional parameters (`$1`–`$3`) no longer trigger `Unknown argument` (Addresses [Issue #3](https://github.com/dan-snelson/Microsoft-365-Reset/issues/3); thanks for the heads-up, @eirikt!)
+#   - Fixed argument parsing so Jamf-style leading positional parameters no longer trigger `Unknown argument` before CLI flags are processed (Addresses [Issue #3](https://github.com/dan-snelson/Microsoft-365-Reset/issues/3); thanks for the heads-up, @eirikt!)
 #
 # Version 0.0.1a2, 13-Mar-2026, Dan K. Snelson
 #   - Aligned cleanup targets with MOFA community-maintained reset scripts
@@ -63,10 +63,13 @@ operationCSV="${5:-}"
 scriptLog="/var/log/org.churchofjesuschrist.log"
 restartMode="Restart Confirm"
 
-# CLI flags override Jamf parameters; non-flag positionals (e.g., Jamf's $1-$3) are silently skipped
+# CLI flags override Jamf parameters; tolerate only the leading Jamf-style positional window
+leadingPositionalCount=0
+seenCLIFlag="false"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --mode)
+            seenCLIFlag="true"
             if [[ -z "${2:-}" || "${2}" == -* ]]; then
                 echo "Missing or invalid value for --mode. Usage: $0 [--mode MODE] [--operations CSV]"
                 exit 10
@@ -75,6 +78,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --operations)
+            seenCLIFlag="true"
             if [[ -z "${2:-}" || "${2}" == -* ]]; then
                 echo "Missing or invalid value for --operations. Usage: $0 [--mode MODE] [--operations CSV]"
                 exit 10
@@ -87,7 +91,13 @@ while [[ $# -gt 0 ]]; do
             exit 10
             ;;
         *)
-            shift
+            if [[ "${seenCLIFlag}" == "false" && ${leadingPositionalCount} -lt 5 ]]; then
+                ((leadingPositionalCount++))
+                shift
+                continue
+            fi
+            echo "Unknown argument: $1"
+            exit 10
             ;;
     esac
 done

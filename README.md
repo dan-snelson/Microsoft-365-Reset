@@ -75,7 +75,7 @@ The script also reads Jamf-style parameters:
 | `$4` | mode |
 | `$5` | operations CSV |
 
-CLI flags (`--mode`, `--operations`) override these values when both are present. Jamf's leading positional arguments (`$1`–`$3`) are silently skipped by the parser.
+CLI flags (`--mode`, `--operations`) override these values when both are present. The parser tolerates up to five leading positional arguments for Jamf-style execution before the first CLI flag, which covers Jamf's `$1-$3` placeholders plus `$4`/`$5`. Unexpected bare positional arguments after a CLI flag still fail validation.
 
 ## Modes
 
