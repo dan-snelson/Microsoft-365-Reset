@@ -1,4 +1,4 @@
-# Microsoft 365 Reset (0.0.1a3)
+# Microsoft 365 Reset (0.0.1a4)
 
 ![Microsoft 365 Reset](images/Microsoft_365_Reset.png)
 

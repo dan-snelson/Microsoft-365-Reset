@@ -2,6 +2,9 @@
 
 ## Changelog
 
+### Version 0.0.1a4 (18-Mar-2026)
+- Improved Jamf parameter handling to skip all leading positionals regardless of count
+
 ### Version 0.0.1a3 (14-Mar-2026)
 - Fixed argument parsing so Jamf-style leading positional parameters no longer trigger `Unknown argument` before CLI flags are processed (Addresses [Issue #3](https://github.com/dan-snelson/Microsoft-365-Reset/issues/3); thanks for the heads-up, @eirikt!)
 

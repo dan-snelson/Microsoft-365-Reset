@@ -14,6 +14,9 @@
 #
 # HISTORY
 #
+# Version 0.0.1a4, 18-Mar-2026, Dan K. Snelson
+#   - Improved Jamf parameter handling to skip all leading positionals regardless of count
+#
 # Version 0.0.1a3, 14-Mar-2026, Dan K. Snelson
 #   - Fixed argument parsing so Jamf-style leading positional parameters no longer trigger `Unknown argument` before CLI flags are processed (Addresses [Issue #3](https://github.com/dan-snelson/Microsoft-365-Reset/issues/3); thanks for the heads-up, @eirikt!)
 #
@@ -40,7 +43,7 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin/
 setopt NONOMATCH
 
 # Script identity
-scriptVersion="0.0.1a3"
+scriptVersion="0.0.1a4"
 humanReadableScriptName="Microsoft 365 Reset"
 scriptName="M365R"
 
@@ -59,12 +62,12 @@ dialogBinary="/usr/local/bin/dialog"
 # Runtime inputs (Jamf parameters by default; CLI flags can override below)
 operationMode="${4:-self-service}"
 operationCSV="${5:-}"
+
 # Client-side Log
 scriptLog="/var/log/org.churchofjesuschrist.log"
 restartMode="Restart Confirm"
 
-# CLI flags override Jamf parameters; tolerate only the leading Jamf-style positional window
-leadingPositionalCount=0
+# CLI flags override Jamf parameters; skip all leading positionals until we see a CLI flag
 seenCLIFlag="false"
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -91,8 +94,7 @@ while [[ $# -gt 0 ]]; do
             exit 10
             ;;
         *)
-            if [[ "${seenCLIFlag}" == "false" && ${leadingPositionalCount} -lt 5 ]]; then
-                ((leadingPositionalCount++))
+            if [[ "${seenCLIFlag}" == "false" ]]; then
                 shift
                 continue
             fi
