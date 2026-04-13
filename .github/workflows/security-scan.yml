@@ -1,6 +1,6 @@
 # Protects Microsoft-365-Reset from common vulnerabilities with Semgrep, Gitleaks, zsh syntax validation, and ShellCheck for tracked sh/bash files. Semgrep findings are uploaded to GitHub code scanning for visibility in the Security tab and PR annotations. Gitleaks comments on PRs when potential secrets are detected. ShellCheck provides annotations for tracked sh/bash issues, with blocking severity for all but SC1090/SC1091 which are informational due to common dynamic sourcing patterns in shell projects.
 
-name: Security Scan
+name: Security Scan (1.0.0)
 
 on:
   push:
