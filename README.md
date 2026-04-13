@@ -1,8 +1,8 @@
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/dan-snelson/Microsoft-365-Reset?display_name=tag) ![GitHub issues](https://img.shields.io/github/issues-raw/dan-snelson/Microsoft-365-Reset) ![GitHub closed issues](https://img.shields.io/github/issues-closed-raw/dan-snelson/Microsoft-365-Reset) ![GitHub pull requests](https://img.shields.io/github/issues-pr-raw/dan-snelson/Microsoft-365-Reset) ![GitHub closed pull requests](https://img.shields.io/github/issues-pr-closed-raw/dan-snelson/Microsoft-365-Reset) [![swiftDialog](https://img.shields.io/badge/swiftDialog-Enabled-blue)](https://swiftdialog.app) [![Semgrep Security Scan](https://img.shields.io/badge/security%20scanned%20by-Semgrep-00C7B7?style=flat&logo=semgrep&logoColor=white)](https://semgrep.dev)
 
-# Microsoft 365 Reset (1.0.0b3)
+# Microsoft 365 Reset (1.0.0)
 
-<img src="images/Microsoft_365_Reset.png" alt="Version 1.0.0b3" width="128" height="128" />
+<img src="images/Microsoft_365_Reset.png" alt="Version 1.0.0" width="128" height="128" />
 
 Unified `zsh` script to repair, reset, or remove Microsoft 365 components on macOS:
 
@@ -105,13 +105,13 @@ Use these IDs in `--operations` CSV:
 
 | ID | Purpose |
 |---|---|
-| `reset_factory` | Stop Office/Microsoft services and prime factory reset dependency set |
-| `reset_word` | Word app repair checks + Word config/template cleanup |
-| `reset_excel` | Excel app repair checks + Excel config/template cleanup |
-| `reset_powerpoint` | PowerPoint repair checks + template/theme/add-in cleanup |
-| `reset_outlook` | Outlook repair checks + Outlook config/keychain cleanup |
+| `reset_factory` | Stop Office/Microsoft services and prime factory reset dependency set; dependent app resets also defer same-run cleanup when a repair occurs |
+| `reset_word` | Word repair/reinstall when needed, or Word config/template cleanup when no repair occurs |
+| `reset_excel` | Excel repair/reinstall when needed, or Excel config/template cleanup when no repair occurs |
+| `reset_powerpoint` | PowerPoint repair/reinstall when needed, or template/theme/add-in cleanup when no repair occurs |
+| `reset_outlook` | Outlook repair/reinstall when needed, or Outlook config/keychain cleanup when no repair occurs |
 | `remove_outlook_data` | Remove Outlook local mailbox profile/data |
-| `reset_onenote` | OneNote repair checks + container/group cleanup |
+| `reset_onenote` | OneNote repair/reinstall when needed, or container/group cleanup when no repair occurs |
 | `remove_onenote_data` | Remove OneNote cached local data |
 | `reset_onedrive` | OneDrive repair checks + cache/container/keychain cleanup |
 | `reset_teams` | Teams reset with app validation/repair when needed + Teams cache/container/keychain cleanup |
@@ -195,6 +195,8 @@ Repair pipeline includes:
 - content-length sanity check
 - Microsoft signature verification
 - `installer -pkg ... -target /`
+
+For `reset_word`, `reset_excel`, `reset_powerpoint`, `reset_outlook`, and `reset_onenote`, a run performs repair/reinstall or configuration cleanup, not both. When one of those apps is repaired, cleanup is deferred to a later run. Because `reset_factory` expands to those operations, it inherits the same behavior for those app-specific resets.
 
 ## Examples
 

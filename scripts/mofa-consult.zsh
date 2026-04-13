@@ -14,7 +14,7 @@ setopt PIPE_FAIL
 autoload -Uz is-at-least
 
 scriptName="mofa-consult"
-scriptVersion="1.0.0b3"
+scriptVersion="1.0.0"
 defaultMofaRepo="../MOFA"
 defaultOutputPath="/var/tmp/M365R-MOFA-report.md"
 upstreamURL="https://github.com/cocopuff2u/MOFA.git"

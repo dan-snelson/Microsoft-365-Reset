@@ -12,9 +12,8 @@
 #
 # HISTORY
 #
-# Version 1.0.0b3, 06-Apr-2026, Dan K. Snelson (@dan-snelson)
-#  - Fresh run of `scripts/mofa-consult.zsh` to sync with the latest MOFA stable feed and generate an updated local inclusion report for this repo
-#  - Modified interactive user cancellations to exit cleanly so Jamf Pro policy logs do not report them as failures.
+# Version 1.0.0, 13-Apr-2026, Dan K. Snelson (@dan-snelson)
+#  - Official 1.0.0 release
 #
 ####################################################################################################
 
@@ -30,7 +29,7 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin/
 setopt NONOMATCH
 
 # Script identity
-scriptVersion="1.0.0b3"
+scriptVersion="1.0.0"
 humanReadableScriptName="Microsoft 365 Reset"
 scriptName="M365R"
 
@@ -122,6 +121,7 @@ selectedOperations=()
 resolvedOperations=()
 failedOperations=()
 completedOperations=()
+repairedOperations=()
 dialogPID=""
 interactiveCancelReturnCode="30"
 
@@ -356,6 +356,15 @@ function appendFailure() {
 function appendCompletion() {
     local op="$1"
     completedOperations+=("${op}")
+}
+
+function appendRepairedOperation() {
+    local op="$1"
+    local item
+    for item in "${repairedOperations[@]}"; do
+        [[ "${item}" == "${op}" ]] && return 0
+    done
+    repairedOperations+=("${op}")
 }
 
 function findKeychainDB() {
@@ -1034,9 +1043,18 @@ function showCompletionDialog() {
     [[ "${operationMode}" == "silent" ]] && return 0
 
     local summary="**Results**<br><br>- Completed operations: ${#completedOperations[@]}<br>- Failed operations: ${#failedOperations[@]}<br>- Elapsed Time: $(formattedElapsedTime)"
+    local repairedTitles=()
+    local op
 
     if [[ ${#failedOperations[@]} -gt 0 ]]; then
         summary+="<br><br>Failed IDs: ${failedOperations[*]}"
+    fi
+
+    if [[ ${#repairedOperations[@]} -gt 0 ]]; then
+        for op in "${repairedOperations[@]}"; do
+            repairedTitles+=("${operationTitle[${op}]}")
+        done
+        summary+="<br><br>Repaired this run; cleanup deferred until a later run: ${(j:, :)repairedTitles}"
     fi
 
     ${dialogBinary} \
@@ -1528,7 +1546,10 @@ function op_reset_word() {
         "${osVersion}"
     local repairRC=$?
     [[ ${repairRC} -eq 1 ]] && return 1
-    [[ ${repairRC} -eq 2 ]] && return 0
+    if [[ ${repairRC} -eq 2 ]]; then
+        appendRepairedOperation reset_word
+        return 0
+    fi
 
     safeRemove "/Library/Preferences/com.microsoft.Word.plist"
     safeRemove "/Library/Managed Preferences/com.microsoft.Word.plist"
@@ -1569,7 +1590,10 @@ function op_reset_excel() {
         "${osVersion}"
     local repairRC=$?
     [[ ${repairRC} -eq 1 ]] && return 1
-    [[ ${repairRC} -eq 2 ]] && return 0
+    if [[ ${repairRC} -eq 2 ]]; then
+        appendRepairedOperation reset_excel
+        return 0
+    fi
 
     safeRemove "/Library/Preferences/com.microsoft.Excel.plist"
     safeRemove "/Library/Managed Preferences/com.microsoft.Excel.plist"
@@ -1615,7 +1639,10 @@ function op_reset_powerpoint() {
         "${osVersion}"
     local repairRC=$?
     [[ ${repairRC} -eq 1 ]] && return 1
-    [[ ${repairRC} -eq 2 ]] && return 0
+    if [[ ${repairRC} -eq 2 ]]; then
+        appendRepairedOperation reset_powerpoint
+        return 0
+    fi
 
     safeRemove "/Library/Preferences/com.microsoft.Powerpoint.plist"
     safeRemove "/Library/Managed Preferences/com.microsoft.Powerpoint.plist"
@@ -1661,7 +1688,10 @@ function op_reset_outlook() {
         "${osVersion}"
     local repairRC=$?
     [[ ${repairRC} -eq 1 ]] && return 1
-    [[ ${repairRC} -eq 2 ]] && return 0
+    if [[ ${repairRC} -eq 2 ]]; then
+        appendRepairedOperation reset_outlook
+        return 0
+    fi
 
     safeRemove "/Library/Preferences/com.microsoft.Outlook.plist"
     safeRemove "/Library/Managed Preferences/com.microsoft.Outlook.plist"
@@ -1735,7 +1765,10 @@ function op_reset_onenote() {
         "${osVersion}"
     local repairRC=$?
     [[ ${repairRC} -eq 1 ]] && return 1
-    [[ ${repairRC} -eq 2 ]] && return 0
+    if [[ ${repairRC} -eq 2 ]]; then
+        appendRepairedOperation reset_onenote
+        return 0
+    fi
 
     safeRemove "/Library/Preferences/com.microsoft.onenote.mac.plist"
     safeRemove "/Library/Managed Preferences/com.microsoft.onenote.mac.plist"

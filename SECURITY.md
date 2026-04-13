@@ -8,7 +8,7 @@ This tool runs with **`root` privileges** and can perform destructive operations
 
 Only the **latest release** is actively supported for security updates.
 
-- Current stable/beta: [v1.0.0b3](https://github.com/dan-snelson/Microsoft-365-Reset/releases) (and newer)
+- Current stable/beta: [v1.0.0](https://github.com/dan-snelson/Microsoft-365-Reset/releases) (and newer)
 - Older releases receive no security patches.
 
 We strongly recommend always using the latest version, especially in Jamf Pro Self Service or MDM deployments.
@@ -67,7 +67,7 @@ For non-vulnerability questions (e.g., “Is it safe to run in my environment?�
 **We. All. Miss. Paul.** — and we want every Mac Admin to be able to reset M365 with confidence and peace of mind.
 
 Grateful for the Mac Admins community that keeps us all safer.  
+
 — Dan K. Snelson  
-(Apple Certified, Jamf Certified, and still learning something new with every deployment)
 
 Last updated: April 2026
