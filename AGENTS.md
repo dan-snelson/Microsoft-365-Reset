@@ -51,6 +51,7 @@ Microsoft 365 Reset should provide a safe, clear, swiftDialog-driven workflow to
 
 - `Microsoft-365-Reset.zsh`: main script
 - `scripts/mofa-consult.zsh`: maintainer helper for MOFA sync and inclusion reporting
+- `Resources/createSelfExtracting.zsh`: maintainer helper for generating self-extracting wrappers of the main script
 - `README.md`: usage and behavior documentation
 - `CHANGELOG.md`: release/change history
 - `Resources/Microsoft_Office_Reset_2.0.0b1_expanded/`: optional local package-era scripts and Distribution reference used for secondary maintainer comparisons
@@ -96,4 +97,5 @@ Maintain the established style of `Microsoft-365-Reset.zsh` unless the user expl
 - Avoid hidden behavior changes during refactors.
 - If changing operation behavior, call out parity impact explicitly.
 - For maintainer-only reporting changes, prefer warning-and-skip behavior over aborting when optional local reference artifacts are missing.
+- Treat generated `*_self-extracting-*.sh` wrappers as build artifacts and leave them untracked unless the user explicitly asks to commit one.
 - Keep naming, formatting, and copy consistent with existing script patterns.

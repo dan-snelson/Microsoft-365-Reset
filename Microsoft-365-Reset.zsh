@@ -45,7 +45,7 @@ applicationIcon="https://usw2.ics.services.jamfcloud.com/icon/hash_8bf6549c22de3
 autoload -Uz is-at-least
 
 # swiftDialog requirement and install paths
-swiftDialogMinimumRequiredVersion="3.0.0.4952"
+swiftDialogMinimumRequiredVersion="3.0.1.4955"
 dialogBinary="/usr/local/bin/dialog"
 
 # Runtime inputs (Jamf parameters by default; CLI flags can override below)

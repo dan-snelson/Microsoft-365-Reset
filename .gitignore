@@ -1,5 +1,5 @@
 # Microsoft 365 Reset
-## Version 0.0.1a1
+## Version 1.0.0
 
 ### macOS
 .DS_Store
@@ -22,11 +22,12 @@ Icon?
 .zcompdump*
 .zcompcache/
 *.zwc
-.envrc
 
 ### Local deployment helper artifacts
-/.deployMicrosoft365Reset.zsh
-/VERSION.txt
+.codex/
+.deploy*
+.envrc
+VERSION.txt
 
 ### Local installer artifact to keep out of source control
 /Resources/Microsoft_Office_Reset_2.0.0b1.pkg
