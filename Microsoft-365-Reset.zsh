@@ -12,8 +12,10 @@
 #
 # HISTORY
 #
-# Version 1.0.0, 13-Apr-2026, Dan K. Snelson (@dan-snelson)
-#  - Official 1.0.0 release
+# Version 1.1.0, 01-May-2026, Dan K. Snelson (@dan-snelson)
+#  - Clarified reset operation picker copy to reflect that Word, Excel, PowerPoint, Outlook, and OneNote defer app-specific cleanup when a repair occurs, and that `reset_factory` may require a later run for repaired app cleanup
+#  - Documented `reset_teams_force` and `remove_acrobat_addin` as repo-local workflows without current MOFA community-script equivalents
+#  - Synced internal auto-repair operation metadata so `reset_teams_force` stays aligned with documented repair behavior
 #
 ####################################################################################################
 
@@ -29,7 +31,7 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin/
 setopt NONOMATCH
 
 # Script identity
-scriptVersion="1.0.0"
+scriptVersion="1.1.0"
 humanReadableScriptName="Microsoft 365 Reset"
 scriptName="M365R"
 
@@ -179,13 +181,13 @@ operationTitle[remove_zoomplugin]="Remove Zoom Outlook Plugin"
 operationTitle[remove_webexpt]="Remove WebEx Productivity Tools"
 
 typeset -A operationDescription
-operationDescription[reset_factory]="Closes all Office apps, checks for damage and performs repairs as necessary. Resets caches, keychains, templates, add-ins and configuration data. This will not remove your personal documents."
-operationDescription[reset_word]="Closes Microsoft Word, checks for damage and performs repairs as necessary. Resets caches, templates, add-ins and configuration data. This will not remove your personal documents."
-operationDescription[reset_excel]="Closes Microsoft Excel, checks for damage and performs repairs as necessary. Resets caches, templates, add-ins and configuration data. This will not remove your personal workbooks."
-operationDescription[reset_powerpoint]="Closes Microsoft PowerPoint, checks for damage and performs repairs as necessary. Resets caches, templates, add-ins and configuration data. This will not remove your personal presentations."
-operationDescription[reset_outlook]="Closes Microsoft Outlook, checks for damage and performs repairs as necessary. Resets caches, credentials, templates, add-ins and configuration data."
+operationDescription[reset_factory]="Closes all Office apps, checks for damage and performs repairs as necessary. Resets shared suite data now; repaired app-specific cleanup may require a later run. This will not remove your personal documents."
+operationDescription[reset_word]="Closes Microsoft Word, checks for damage and performs repairs as necessary. If repair is needed, additional reset cleanup runs on a later pass. This will not remove your personal documents."
+operationDescription[reset_excel]="Closes Microsoft Excel, checks for damage and performs repairs as necessary. If repair is needed, additional reset cleanup runs on a later pass. This will not remove your personal workbooks."
+operationDescription[reset_powerpoint]="Closes Microsoft PowerPoint, checks for damage and performs repairs as necessary. If repair is needed, additional reset cleanup runs on a later pass. This will not remove your personal presentations."
+operationDescription[reset_outlook]="Closes Microsoft Outlook, checks for damage and performs repairs as necessary. If repair is needed, additional reset cleanup runs on a later pass."
 operationDescription[remove_outlook_data]="Closes Microsoft Outlook and removes all mailbox data. Warning: This will remove all local mailbox data."
-operationDescription[reset_onenote]="Closes Microsoft OneNote, checks for damage and performs repairs as necessary. Resets caches, local synchronized content and configuration data."
+operationDescription[reset_onenote]="Closes Microsoft OneNote, checks for damage and performs repairs as necessary. If repair is needed, additional reset cleanup runs on a later pass."
 operationDescription[remove_onenote_data]="Closes Microsoft OneNote and removes cached data. Warning: This will remove any content that has not synchronized with the cloud."
 operationDescription[reset_onedrive]="Closes Microsoft OneDrive, checks for damage and performs repairs as necessary. Resets caches and configuration data. This will not remove your synchronized OneDrive files."
 operationDescription[reset_teams]="Closes Microsoft Teams, checks for damage and performs repairs as necessary. Resets caches, credentials and configuration data."
@@ -222,7 +224,7 @@ operationIcon[remove_acrobat_addin]="https://usw2.ics.services.jamfcloud.com/ico
 operationIcon[remove_zoomplugin]="https://usw2.ics.services.jamfcloud.com/icon/hash_be66420495a3f2f1981a49a0e0ad31783e9a789e835b4196af60554bf4c115ac"
 operationIcon[remove_webexpt]="https://usw2.ics.services.jamfcloud.com/icon/hash_fa1bd349edd751595ae0f20ab36b8e76199ba66454b7a74cd5d51bb8f0627893"
 
-autoRepairOps=(reset_word reset_excel reset_powerpoint reset_outlook reset_onenote reset_onedrive reset_teams reset_autoupdate)
+autoRepairOps=(reset_word reset_excel reset_powerpoint reset_outlook reset_onenote reset_onedrive reset_teams reset_teams_force reset_autoupdate)
 
 
 
