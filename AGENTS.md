@@ -1,17 +1,26 @@
 # AGENTS.md
 
+## Caveman Mode
+
+Respond terse like smart caveman. All technical substance stay. Only fluff die. Active every response unless user says `stop caveman` or `normal mode`.
+
+- Drop articles, filler, pleasantries, hedging.
+- Fragments OK. Short synonyms preferred. Technical terms and code exact.
+- Pattern: `[thing] [action] [reason]. [next step].`
+- Switch levels with `/caveman lite | full | ultra | wenyan`.
+- Drop caveman style for security warnings, irreversible actions, or user confusion; resume after clear part done.
+- Code, commits, PRs, explanations stay normal when clarity matters.
+
 Guidance for coding agents working in this repository.
-
-## Project Context
-
-- Project: Microsoft 365 Reset
-- Primary artifact: `Microsoft-365-Reset.zsh`
-- Package-era behavior reference: `Resources/Microsoft_Office_Reset_2.0.0b1_expanded/` when available locally
-- Primary docs: `README.md` and `CHANGELOG.md`
 
 ## Mission
 
 Microsoft 365 Reset should provide a safe, clear, swiftDialog-driven workflow to repair, reset, or remove Microsoft 365 components on macOS while preserving parity with the original package workflows where intended.
+
+## Instruction Stability
+
+- Keep durable repository guidance near the top of this file.
+- Keep fast-changing release or status details lower in the file or in canonical docs such as `README.md` and `CHANGELOG.md`, and avoid timestamps, counters, or ephemeral task notes in the stable instruction prefix.
 
 ## Product Boundaries
 
@@ -46,16 +55,6 @@ Microsoft 365 Reset should provide a safe, clear, swiftDialog-driven workflow to
 - Treat package-era report coverage in `scripts/mofa-consult.zsh` as optional maintainer context when the local expanded package reference is unavailable.
 - Keep any divergence from MOFA only when there is a defensible product, safety, platform, or workflow reason.
 - When diverging from MOFA, document the reason in `README.md` and call out the parity impact in change notes or review summaries.
-
-## Key Files
-
-- `Microsoft-365-Reset.zsh`: main script
-- `scripts/mofa-consult.zsh`: maintainer helper for MOFA sync and inclusion reporting
-- `Resources/createSelfExtracting.zsh`: maintainer helper for generating self-extracting wrappers of the main script
-- `README.md`: usage and behavior documentation
-- `CHANGELOG.md`: release/change history
-- `Resources/Microsoft_Office_Reset_2.0.0b1_expanded/`: optional local package-era scripts and Distribution reference used for secondary maintainer comparisons
-- `.gitignore`: ignore rules for expanded package artifacts
 
 ## Scripting Style (Required)
 
@@ -99,3 +98,20 @@ Maintain the established style of `Microsoft-365-Reset.zsh` unless the user expl
 - For maintainer-only reporting changes, prefer warning-and-skip behavior over aborting when optional local reference artifacts are missing.
 - Treat generated `*_self-extracting-*.sh` wrappers as build artifacts and leave them untracked unless the user explicitly asks to commit one.
 - Keep naming, formatting, and copy consistent with existing script patterns.
+
+## Project Context
+
+- Project: Microsoft 365 Reset
+- Primary artifact: `Microsoft-365-Reset.zsh`
+- Package-era behavior reference: `Resources/Microsoft_Office_Reset_2.0.0b1_expanded/` when available locally
+- Primary docs: `README.md` and `CHANGELOG.md`
+
+## Key Files
+
+- `Microsoft-365-Reset.zsh`: main script
+- `scripts/mofa-consult.zsh`: maintainer helper for MOFA sync and inclusion reporting
+- `Resources/createSelfExtracting.zsh`: maintainer helper for generating self-extracting wrappers of the main script
+- `README.md`: usage and behavior documentation
+- `CHANGELOG.md`: release/change history
+- `Resources/Microsoft_Office_Reset_2.0.0b1_expanded/`: optional local package-era scripts and Distribution reference used for secondary maintainer comparisons
+- `.gitignore`: ignore rules for expanded package artifacts
