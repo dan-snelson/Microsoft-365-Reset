@@ -1,8 +1,8 @@
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/dan-snelson/Microsoft-365-Reset?display_name=tag) ![GitHub issues](https://img.shields.io/github/issues-raw/dan-snelson/Microsoft-365-Reset) ![GitHub closed issues](https://img.shields.io/github/issues-closed-raw/dan-snelson/Microsoft-365-Reset) ![GitHub pull requests](https://img.shields.io/github/issues-pr-raw/dan-snelson/Microsoft-365-Reset) ![GitHub closed pull requests](https://img.shields.io/github/issues-pr-closed-raw/dan-snelson/Microsoft-365-Reset) [![swiftDialog](https://img.shields.io/badge/swiftDialog-Enabled-blue)](https://swiftdialog.app) [![Semgrep Security Scan](https://img.shields.io/badge/security%20scanned%20by-Semgrep-00C7B7?style=flat&logo=semgrep&logoColor=white)](https://semgrep.dev)
 
-# Microsoft 365 Reset (1.1.0)
+# Microsoft 365 Reset (1.2.0)
 
-<img src="images/Microsoft_365_Reset.png" alt="Version 1.1.0" width="128" height="128" />
+<img src="images/Microsoft_365_Reset.png" alt="Version 1.2.0" width="128" height="128" />
 
 Unified `zsh` script to repair, reset, or remove Microsoft 365 components on macOS:
 
@@ -22,14 +22,20 @@ The script consolidates expanded package workflows into one root-run tool with:
 - Auto-repair for selected Microsoft apps using Microsoft-hosted packages
 - MOFA community-maintained reset script contents adapted into the unified workflow
 
-[MOFA](https://mofa.cocolabs.dev/macos_tools/microsoft_office_repair_tools.html) alignment and intentional divergence notes:
+[MOFA](https://mofa.cocolabs.dev/macos_tools/microsoft_office_repair_tools.html) alignment notes:
+
+- Separate `reset_license` and `reset_credentials` operations align with MOFA's separate license-only and broader sign-in reset flows
+
+Intentional divergences from current MOFA behavior:
 
 - `reset_factory` performs its own MOFA-style suite cleanup in addition to dependency expansion
 - App repair/reinstall flows for Word, Excel, PowerPoint, Outlook, and OneNote now stop after repair instead of continuing with configuration cleanup in the same run
 - `reset_teams` preserves Teams backgrounds, resets Teams TCC state, and opens Screen Recording settings in interactive modes
 - `reset_teams` preserves installed Teams app bundles unless repair is required; `reset_teams_force` performs the explicit app removal and reinstall path
 - Teams reset and AutoUpdate registration now treat new Teams as the current `TEAMS21` product while keeping classic Teams on the legacy product ID
-- Separate `reset_license` and `reset_credentials` operations cover MOFA's split between license-only and broader sign-in reset flows
+
+Repo-local operations without current MOFA community-script equivalents:
+
 - `reset_teams_force` provides a force-reinstall path for Teams without adding a new CLI parameter
 - `reset_teams_force` and `remove_acrobat_addin` remain repo-local workflows without current MOFA community-script equivalents
 

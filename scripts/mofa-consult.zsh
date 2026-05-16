@@ -103,7 +103,7 @@ function appendReportLine() {
 function emitCodexPrompt() {
     local codexPrompt
 
-    codexPrompt="Use \$workspace to review ${outputPath}, then inspect ${m365ScriptPath}, ${readmePath}, and ${agentsPath}. Evaluate the candidate inclusion items, intentional divergences, and local-only operations against the current Microsoft 365 Reset behavior and maintainer guidance, then recommend any safe follow-up changes for this repo."
+    codexPrompt="Use \$caveman full and \$workspace to review ${outputPath}, then inspect ${m365ScriptPath}, ${readmePath}, and ${agentsPath}. Evaluate the candidate inclusion items, intentional divergences, and local-only operations against the current Microsoft 365 Reset behavior and maintainer guidance, then recommend any safe follow-up changes for this repo."
 
     print -r -- "Codex Chat prompt: ${codexPrompt}"
     if command -v pbcopy >/dev/null 2>&1; then
@@ -362,8 +362,6 @@ function buildScriptCoverageSection() {
     intentionalNoteForOperation[reset_onenote]="README parity note: Word, Excel, PowerPoint, Outlook, and OneNote stop after repair instead of continuing with configuration cleanup."
     intentionalNoteForOperation[reset_teams]="README parity note: reset_teams preserves Teams backgrounds, resets Teams TCC state, opens Screen Recording settings in interactive modes, and preserves app bundles unless repair is required."
     intentionalNoteForOperation[reset_autoupdate]="README parity note: AutoUpdate registration treats new Teams as TEAMS21 while keeping classic Teams on the legacy product ID."
-    intentionalNoteForOperation[reset_license]="README parity note: reset_license and reset_credentials split MOFA's license-only and broader sign-in reset flows."
-    intentionalNoteForOperation[reset_credentials]="README parity note: reset_license and reset_credentials split MOFA's license-only and broader sign-in reset flows."
 
     localOnlyReason[reset_teams_force]="Local-only force-reinstall path for Teams."
     localOnlyReason[remove_acrobat_addin]="Local-only Adobe Acrobat add-in cleanup workflow."
