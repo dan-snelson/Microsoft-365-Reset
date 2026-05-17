@@ -6,7 +6,9 @@ applyTo: "**/*.zsh"
 
 # Microsoft 365 Reset Zsh Conventions
 
-**Priority Order**: 1. Syntax Validation -> 2. Silent Safety -> 3. Deterministic Execution -> 4. Existing Style
+**Priority Order**: 1. Syntax Validation → 2. Silent Safety → 3. Deterministic Execution → 4. Existing Style
+
+**Conflict Resolution Rule**: When priorities conflict, resolve in the order listed above. For example, if validation and style conflict, prioritize validation. If Silent Safety conflicts with Existing Style, prioritize Silent Safety.
 
 ## 1. Required Validation
 
@@ -14,6 +16,7 @@ applyTo: "**/*.zsh"
 - After edits to `scripts/mofa-consult.zsh`, run `zsh -n scripts/mofa-consult.zsh`.
 - After any other Zsh edit, run `zsh -n` on the modified file before considering the change complete.
 - Treat validation as mandatory even for small, local edits.
+- If `zsh -n` fails, identify and fix all syntax errors before proceeding. Do not continue until validation passes.
 
 ## 2. Mode Safety
 
@@ -41,17 +44,20 @@ applyTo: "**/*.zsh"
 ## 5. Scope and Boundaries
 
 - Prefer minimal, surgical edits over broad rewrites.
-- Resolve ambiguity in favor of `AGENTS.md` and current repo behavior.
+- For **new files**: Ensure they follow the same conventions, validation steps, and style rules as existing files in the repo.
+- For **deleted files**: Confirm that no dependencies are broken and that removal does not affect `self-service`, `silent`, or logging behavior.
+- Resolve ambiguity in favor of `AGENTS.md` and the behavior defined in the latest committed version of the repository.
 - Do not add production dependencies without explicit approval.
 - Do not change operation semantics, defaults, CLI parameters, or release artifacts unless the task explicitly requires it.
 
 ## 6. Post-Edit Checklist
 
-- [ ] Ran `zsh -n` against every modified Zsh file.
+- [ ] Ran `zsh -n` against every modified Zsh file and fixed any failures before proceeding.
 - [ ] Confirmed no UI-only behavior leaked into `silent`.
 - [ ] Preserved deterministic execution ordering and dependency handling.
 - [ ] Used existing project logging functions.
 - [ ] Kept comments concise and style-consistent.
 - [ ] Left `/var/log/org.churchofjesuschrist.log` unchanged unless explicitly requested.
+- [ ] New files follow repo conventions; deleted files did not break dependencies.
 
-**Reference**: `AGENTS.md` defines repo boundaries, validation, mode expectations, and scripting style; follow it when instructions conflict.
+**Reference**: `AGENTS.md` defines repo boundaries, validation, mode expectations, and scripting style; follow it when instructions conflict. Use the behavior defined in the latest committed version of the repository as the authoritative source for current repo behavior.

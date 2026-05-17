@@ -8,47 +8,52 @@ applyTo: "scripts/mofa-consult.zsh"
 
 **Core Principle**: Maintain explicit, MOFA-first parity reporting while degrading cleanly when the optional package-era reference is absent.
 
-## 1. Source Priority
+## Primary Constraints (Highest Priority)
 
 - Start with `scripts/mofa-consult.zsh` and current MOFA behavior.
-- Treat MOFA as the primary parity baseline.
+- Treat MOFA as the primary parity baseline at all times.
+- Do not allow package-era behavior to override current MOFA behavior unless explicitly reported in the output.
+- If both MOFA and the optional package-era reference are unavailable, output a clear error message and skip the comparison entirely.
+
+## Secondary Considerations
+
 - Use `Resources/Microsoft_Office_Reset_2.0.0b1_expanded/` only as an optional secondary comparison source.
-- Do not let package-era behavior silently override current MOFA behavior.
-
-## 2. Optional Reference Handling
-
-- Preserve warning-and-skip behavior when `Resources/Microsoft_Office_Reset_2.0.0b1_expanded/` is missing locally.
-- Missing optional reference data should not abort maintainer reporting.
-- Keep the report clean and explicit about what could and could not be compared.
+- Preserve warning-and-skip behavior when the optional package-era reference is missing locally.
+- Missing optional reference data must not abort maintainer reporting.
 - When the optional reference is present, compare it without changing runtime workflow semantics.
 
-## 3. Report Wording Rules
+## Report Wording Rules
 
 - State MOFA coverage explicitly.
 - State retained package-era logic explicitly when it still informs the repo.
 - Call out parity gaps or deliberate divergence in direct language.
+- Ensure the report is concise and explicitly states what could and could not be compared.
 - Prefer wording that distinguishes current behavior, retained legacy behavior, and unavailable comparison data.
 
-## 4. Validation Requirements
+## Validation Requirements
 
 - After edits to `scripts/mofa-consult.zsh`, run `zsh -n scripts/mofa-consult.zsh`.
 - If parity work also edits `Microsoft-365-Reset.zsh`, run `zsh -n Microsoft-365-Reset.zsh`.
 - Validate maintainer reporting with the optional package-era reference present.
 - Validate maintainer reporting with the optional package-era reference absent.
+- Before using the optional reference, validate that the data is present and not corrupted. If the optional reference data is invalid or corrupted, output a warning and skip the comparison for that reference.
 
-## 5. Boundaries
+## Boundaries
 
 - Keep changes focused on maintainer reporting and comparison behavior.
 - Prefer warning-and-skip behavior over aborting for optional-reference issues.
 - Do not change runtime reset, repair, removal, chooser, or dependency behavior unless that broader workflow change is explicitly in scope.
 
-## 6. Post-Edit Checklist
+## Post-Edit Checklist
 
 - [ ] MOFA stayed the primary parity baseline.
+- [ ] Package-era behavior did not override MOFA unless explicitly reported.
 - [ ] Optional package-era reference remained optional.
 - [ ] Warning-and-skip behavior remained intact when the reference was missing.
-- [ ] Parity gaps and retained package-era logic are worded explicitly.
+- [ ] Both-sources-unavailable scenario produces a clear error and skips comparison.
+- [ ] Parity gaps and retained package-era logic are worded explicitly and concisely.
 - [ ] `zsh -n scripts/mofa-consult.zsh` ran after helper edits.
 - [ ] Reporting expectations were checked with and without the optional reference.
+- [ ] Invalid or corrupted optional reference data triggers a warning and skips comparison.
 
 **Reference**: Follow `AGENTS.md` first, then `scripts/mofa-consult.zsh`, then optional package-era materials for secondary comparison.
