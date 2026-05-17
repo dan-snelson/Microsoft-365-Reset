@@ -1,8 +1,8 @@
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/dan-snelson/Microsoft-365-Reset?display_name=tag) ![GitHub issues](https://img.shields.io/github/issues-raw/dan-snelson/Microsoft-365-Reset) ![GitHub closed issues](https://img.shields.io/github/issues-closed-raw/dan-snelson/Microsoft-365-Reset) ![GitHub pull requests](https://img.shields.io/github/issues-pr-raw/dan-snelson/Microsoft-365-Reset) ![GitHub closed pull requests](https://img.shields.io/github/issues-pr-closed-raw/dan-snelson/Microsoft-365-Reset) [![swiftDialog](https://img.shields.io/badge/swiftDialog-Enabled-blue)](https://swiftdialog.app) [![Semgrep Security Scan](https://img.shields.io/badge/security%20scanned%20by-Semgrep-00C7B7?style=flat&logo=semgrep&logoColor=white)](https://semgrep.dev)
 
-# Microsoft 365 Reset (1.2.0b1)
+# Microsoft 365 Reset (1.2.0b2)
 
-<img src="images/Microsoft_365_Reset.png" alt="Version 1.2.0b1" width="128" height="128" />
+<img src="images/Microsoft_365_Reset.png" alt="Version 1.2.0b2" width="128" height="128" />
 
 Unified `zsh` script to repair, reset, or remove Microsoft 365 components on macOS:
 
@@ -82,7 +82,7 @@ sudo ./Microsoft-365-Reset.zsh [--mode MODE] [--operations CSV]
 | Argument | Default | Description |
 |---|---|---|
 | `--mode` | `self-service` | `self-service`, `silent`, `test`, `debug` |
-| `--operations` | empty | Comma-separated operation IDs (primarily for `silent`) |
+| `--operations` | empty | Comma-separated operation IDs; required for `silent`, and constrains interactive chooser options in `self-service`, `test`, and `debug` when provided |
 
 Checkbox style is hard-coded to `switch,large` in the interactive selection UI, and each option includes its own operation icon.
 
@@ -101,14 +101,14 @@ CLI flags (`--mode`, `--operations`) override these values when both are present
 
 | Mode | Behavior |
 |---|---|
-| `self-service` | Full interactive flow (intro, selection, destructive confirmation, resolved-operation progress summary, completion) |
-| `test` | Interactive flow, useful for operator testing |
-| `debug` | Interactive flow + `set -x` |
+| `self-service` | Full interactive flow (intro, selection, destructive confirmation, resolved-operation progress summary, completion); when `--operations`/`$5` is provided, the selection dialog shows only those operation IDs |
+| `test` | Interactive flow, useful for operator testing; honors `--operations`/`$5` as chooser constraint when provided |
+| `debug` | Interactive flow + `set -x`; honors `--operations`/`$5` as chooser constraint when provided |
 | `silent` | No dialogs; operations must be provided via `--operations`/`$5` |
 
 ## Supported Operations
 
-Use these IDs in `--operations` CSV:
+Use these IDs in `--operations` CSV for silent execution or interactive chooser filtering:
 
 | ID | Purpose |
 |---|---|
@@ -213,6 +213,14 @@ Interactive (default):
 
 ```bash
 sudo ./Microsoft-365-Reset.zsh
+```
+
+Interactive run with chooser limited to Outlook-safe reset operations:
+
+```bash
+sudo ./Microsoft-365-Reset.zsh \
+  --mode self-service \
+  --operations reset_outlook,reset_credentials,reset_license
 ```
 
 Silent run with explicit operations:
