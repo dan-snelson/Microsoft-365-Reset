@@ -12,7 +12,7 @@
 #
 # HISTORY
 #
-# Version 1.2.0b2, 16-May-2026, Dan K. Snelson (@dan-snelson)
+# Version 1.2.0, 20-May-2026, Dan K. Snelson (@dan-snelson)
 # - Reclassified `reset_license` and `reset_credentials` as MOFA-aligned coverage in `scripts/mofa-consult.zsh` instead of intentional divergences
 # - Clarified `README.md` MOFA notes to separate aligned behavior, intentional divergences, and repo-local operations
 # - Fixed `--operations` / Jamf `$5` CSV parsing so comma-separated operation IDs execute as separate selections in `silent` mode (Addresses #16; thanks for the detailed report and recommended fix, @meschwartz!)
@@ -32,7 +32,7 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin/
 setopt NONOMATCH
 
 # Script identity
-scriptVersion="1.2.0b2"
+scriptVersion="1.2.0"
 humanReadableScriptName="Microsoft 365 Reset"
 scriptName="M365R"
 

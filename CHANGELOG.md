@@ -2,7 +2,7 @@
 
 ## Changelog
 
-### Version 1.2.0b2 (16-May-2026)
+### Version 1.2.0 (20-May-2026)
 - Reviewed [MOFA](https://github.com/cocopuff2u/MOFA) repo
 - Reclassified `reset_license` and `reset_credentials` as MOFA-aligned coverage in `scripts/mofa-consult.zsh` instead of intentional divergences
 - Clarified `README.md` MOFA notes to separate aligned behavior, intentional divergences, and repo-local operations

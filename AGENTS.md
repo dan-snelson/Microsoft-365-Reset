@@ -7,12 +7,6 @@ Claude Code users: symlink with `ln -s AGENTS.md CLAUDE.md` or reference via `@A
 ## Caveman Mode
 
 Respond terse like smart caveman. All technical substance stay. Only fluff die. Active every response unless user says `stop caveman` or `normal mode`.
-
-- Drop articles, filler, pleasantries, hedging.
-- Fragments OK. Short synonyms preferred. Technical terms and code exact.
-- Pattern: `[thing] [action] [reason]. [next step].`
-- Switch levels with `/caveman lite | full | ultra | wenyan`.
-- Drop caveman style for security warnings, irreversible actions, or user confusion; resume after clear part done.
 - Code, commits, PRs, explanations stay normal when clarity matters.
 
 Guidance for coding agents working in this repository.
@@ -20,9 +14,6 @@ Guidance for coding agents working in this repository.
 ## Orchestration Contract
 
 This file codifies project rules, boundaries, workflows, and repeatable skills. If same correction repeats, formalize it here instead of re-prompting it.
-
-- Keep durable repository guidance near the top of this file.
-- Keep fast-changing release or status details lower in this file or in canonical docs such as `README.md` and `CHANGELOG.md`.
 - Avoid timestamps, counters, or ephemeral task notes in the stable instruction prefix.
 
 ## Project Overview
@@ -30,24 +21,9 @@ This file codifies project rules, boundaries, workflows, and repeatable skills. 
 Microsoft 365 Reset provides a safe, clear, swiftDialog-driven workflow to repair, reset, or remove Microsoft 365 components on macOS while preserving parity with the original package workflows where intended. Primary artifact: `Microsoft-365-Reset.zsh`. Supported modes: `self-service`, `silent`, `test`, and `debug`.
 
 ## Key Commands
-
-- Validate syntax after **every** script edit: `zsh -n Microsoft-365-Reset.zsh`
-- After modifying MOFA helper logic: `zsh -n scripts/mofa-consult.zsh`
-- View canonical version marker: `cat VERSION.txt`
-- When changing `scripts/mofa-consult.zsh`, validate behavior both with and without `Resources/Microsoft_Office_Reset_2.0.0b1_expanded/` present locally
 - When changing workflow behavior, validate `self-service` and `silent` assumptions before widening scope
 
 ## Agent Workflow
-
-- Start non-trivial changes in Plan mode or equivalent.
-- In Plan mode, make no changes and propose no code until confidence is high; ask follow-up questions until behavior, parity impact, and scope are clear.
-- Default user-facing communication mode: `$caveman full`, except for security warnings, irreversible actions, or clear user confusion.
-- Treat context like a scalpel, not a net; provide only files, lines, and examples needed.
-- Use surgical edits; reference exact functions, ranges, or list-item IDs instead of pasting large sections.
-- After any edit to `Microsoft-365-Reset.zsh` or `scripts/mofa-consult.zsh`, run `zsh -n` immediately, then validate the affected workflow assumptions.
-- Confirm this file is loaded before starting a session.
-- Prefer batching related work into one well-scoped prompt.
-- Never let UI-only behavior leak into `silent` or break deterministic operation ordering.
 - Use codified Skills when they fit instead of re-describing the workflow.
 
 ## Skills
@@ -82,28 +58,12 @@ Invoke relevant skill name during planning.
 ## Boundaries
 
 **Always allowed without asking**
-
-- Read any repository file, including optional package-era reference artifacts.
-- Run `zsh -n`, syntax checks, and Markdown consistency reviews.
-- Make small targeted edits that follow the rules below.
 - Update log copy, dialog copy, or maintainer wording when semantics do not change.
 
 **Ask before doing**
-
-- Modify operation ordering, dependency relationships, or chooser logic.
-- Change reset, repair, or removal semantics.
-- Change default behavior, exit-code semantics, logging contracts, or CLI parameters.
-- Modify release artifacts under `Resources/`.
-- Change the hard-coded client log path.
-- Add production dependencies or external tooling.
 - Update `VERSION.txt` or prepare a release.
 
 **Never do**
-
-- Hardcode secrets, API keys, organization-specific data, or credentials.
-- Modify files outside current task scope without approval.
-- Change MOFA or package-era parity behavior without documenting the reason and parity impact.
-- Break deterministic execution ordering or let UI-only behavior leak into `silent`.
 - Commit generated `*_self-extracting-*.sh` wrappers unless explicitly asked.
 
 ## Source of Truth
@@ -121,18 +81,9 @@ When files disagree, prefer:
 Mission: provide a safe, clear Microsoft 365 repair, reset, and removal workflow on macOS with swiftDialog-driven guidance and deterministic automation.
 
 In scope:
-
-- Microsoft 365 reset, repair, and removal workflows on macOS
-- swiftDialog-driven user flow in `self-service`, `test`, and `debug`
-- silent automation flow in `silent`
-- deterministic operation ordering and dependency resolution
 - structured logging and predictable exit codes
 
 Out of scope:
-
-- non-macOS support
-- broad architectural rewrites unless explicitly requested
-- adding production dependencies without explicit user approval
 - changing operation semantics without documenting and confirming intent
 
 ## Implementation Priorities
@@ -149,31 +100,12 @@ Out of scope:
 - Prefer MOFA behavior over package-era behavior by default.
 - Use the package-era reference as secondary context unless MOFA does not cover the behavior in question.
 - Treat package-era report coverage in `scripts/mofa-consult.zsh` as optional maintainer context when the local expanded package reference is unavailable.
-- Keep any divergence from MOFA only when there is a defensible product, safety, platform, or workflow reason.
-- When diverging from MOFA, document the reason in `README.md` and call out the parity impact in change notes or review summaries.
-
-## Key Files
-
-- `Microsoft-365-Reset.zsh`: main script and runtime behavior source
-- `scripts/mofa-consult.zsh`: maintainer helper for MOFA sync and inclusion reporting
 - `Resources/createSelfExtracting.zsh`: maintainer helper for generating self-extracting wrappers of the main script
 - `README.md` and `CHANGELOG.md`: usage, behavior, and release history
 - `VERSION.txt`: canonical release marker
-- `Resources/Microsoft_Office_Reset_2.0.0b1_expanded/`: optional local package-era scripts and `Distribution` reference used for secondary maintainer comparisons
-- `.gitignore`: ignore rules for expanded package artifacts and generated wrappers
-
-## Current Runtime Hotspots
 
 - MOFA remains the primary parity baseline; if the package-era reference points at different chooser or dependency behavior, document any retained divergence instead of silently inheriting legacy behavior.
 - `scripts/mofa-consult.zsh` must produce a clean maintainer report whether `Resources/Microsoft_Office_Reset_2.0.0b1_expanded/` is present or absent locally.
-- Changes that touch reset, repair, or removal operations must keep `self-service` and `silent` aligned on ordering, dependency handling, and exit behavior.
-- Generated `Resources/*_self-extracting-*.sh` files are build artifacts; avoid churn unless packaging refresh is explicitly requested.
-
-## Repository Rules
-
-- Prefer minimal targeted edits over broad rewrites.
-- Avoid hidden behavior changes during refactors.
-- If changing operation behavior, call out parity impact explicitly.
 - For maintainer-only reporting changes, prefer warning-and-skip behavior over aborting when optional local reference artifacts are missing.
 - Keep naming, formatting, and copy consistent with existing script patterns.
 - Check `git status` before editing shared docs or assets so unrelated local work is not overwritten.
@@ -193,9 +125,6 @@ These rules override ad-hoc prompting. Match established `Microsoft-365-Reset.zs
 7. Keep log format consistent: `<script name> (<version>): <timestamp>  [LEVEL] <message>`.
 8. Keep elapsed-time format consistent: `Elapsed Time: %dh:%dm:%ds`.
 9. Keep dialog conventions consistent: use global `fontSize` via `--messagefont "size=${fontSize}"`, keep warning emphasis readable and intentional, and keep selection UI behavior consistent with current picker flow.
-10. Do not add or remove CLI parameters unless explicitly requested.
-11. Keep the client-side log path hard-coded unless explicitly requested: `scriptLog="/var/log/org.churchofjesuschrist.log"`.
-
 ## Mode Expectations
 
 - `self-service` is the primary guided user flow.
@@ -226,12 +155,31 @@ These rules override ad-hoc prompting. Match established `Microsoft-365-Reset.zs
 Apply only for release prep.
 
 1. Keep `scriptVersion` and `VERSION.txt` aligned.
-2. Ensure the top `CHANGELOG.md` entry matches shipped behavior and correct date.
-3. Confirm `README.md` reflects current reset, repair, and removal workflows and parameters.
-4. Verify MOFA and package-era divergence notes still match actual behavior.
-5. Run syntax validation on every modified Zsh file.
 6. Validate `self-service` and `silent` assumptions end-to-end.
 7. Leave generated self-extracting wrappers untracked unless packaging refresh is explicitly requested.
+
+
+- A report with zero `Candidate inclusion` items usually means no workflow change is needed.
+- Current intentional divergences must be verified against `Microsoft-365-Reset.zsh`, not accepted from report wording alone.
+
+- Treat the maintainer report as a hypothesis generator. Confirm each candidate, divergence, and local-only item in the owning code path before recommending changes.
+- Verify parity from implementation outward: `Microsoft-365-Reset.zsh` first, then `README.md`, then optional package-era context. This avoids docs-led false positives.
+
+### Notable Code / Commands / Config
+
+- `showCompletionDialog()`: confirms whether deferred-cleanup behavior is user-visible and already documented.
+
+### Decisions & Rationale
+
+- Do not recommend workflow edits when the report shows no candidate inclusions and current divergences are both implemented and documented.
+- Prefer small documentation cleanup over runtime change when the only defect is duplicated wording or report-summary drift.
+- Keep MOFA as the primary baseline and use package-era materials only to explain retained local behavior or missing MOFA coverage.
+
+### Documentation / Next Steps
+
+- Keep `README.md` MOFA-alignment, intentional-divergence, and repo-local sections aligned with the report classifications.
+- Re-check local-only operations if MOFA later ships first-class equivalents for them.
+- If AGENTS guidance changes the durable review workflow again, consider adding an `Internal` note to `CHANGELOG.md` when that change is broad enough to matter for maintainers.
 
 ## Maintenance
 
