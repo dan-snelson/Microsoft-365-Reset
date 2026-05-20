@@ -220,7 +220,7 @@ Interactive run with chooser limited to Outlook-safe reset operations:
 ```bash
 sudo ./Microsoft-365-Reset.zsh \
   --mode self-service \
-  --operations reset_outlook,reset_credentials,reset_license
+  --operations reset_outlook,reset_credentials
 ```
 
 Silent run with explicit operations:

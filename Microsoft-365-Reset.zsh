@@ -811,6 +811,7 @@ function showSelectionDialog() {
 
     local checkboxArgs=()
     local allowedOperations=()
+    local includesRemoveOffice="false"
     local op
     local baseMessage
     local warningMessage=""
@@ -832,9 +833,13 @@ function showSelectionDialog() {
 
     for op in "${allowedOperations[@]}"; do
         checkboxArgs+=(--checkbox "${operationTitle[${op}]},name=${op},icon=${operationIcon[${op}]}")
+        [[ "${op}" == "remove_office" ]] && includesRemoveOffice="true"
     done
 
-    baseMessage="Select one or more reset / removal operations.\n\nNote: Choosing **Completely remove Microsoft 365** suppresses reset-related actions."
+    baseMessage="Select one or more reset / removal operations."
+    if [[ "${includesRemoveOffice}" == "true" ]]; then
+        baseMessage="${baseMessage}\n\nNote: Choosing **Completely remove Microsoft 365** suppresses reset-related actions."
+    fi
 
     while true; do
         messageText="${baseMessage}"
