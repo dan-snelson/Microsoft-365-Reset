@@ -12,10 +12,11 @@
 #
 # HISTORY
 #
-# Version 1.1.0, 01-May-2026, Dan K. Snelson (@dan-snelson)
-#  - Clarified reset operation picker copy to reflect that Word, Excel, PowerPoint, Outlook, and OneNote defer app-specific cleanup when a repair occurs, and that `reset_factory` may require a later run for repaired app cleanup
-#  - Documented `reset_teams_force` and `remove_acrobat_addin` as repo-local workflows without current MOFA community-script equivalents
-#  - Synced internal auto-repair operation metadata so `reset_teams_force` stays aligned with documented repair behavior
+# Version 1.2.0, 20-May-2026, Dan K. Snelson (@dan-snelson)
+# - Reclassified `reset_license` and `reset_credentials` as MOFA-aligned coverage in `scripts/mofa-consult.zsh` instead of intentional divergences
+# - Clarified `README.md` MOFA notes to separate aligned behavior, intentional divergences, and repo-local operations
+# - Fixed `--operations` / Jamf `$5` CSV parsing so comma-separated operation IDs execute as separate selections in `silent` mode (Addresses #16; thanks for the detailed report and recommended fix, @meschwartz!)
+# - Constrained interactive operation picker to CSV-listed operations when `--operations` / Jamf `$5` is provided in `self-service`, `test`, or `debug` mode (Addresses #15; thanks for the suggestion, @andreilabin!)
 #
 ####################################################################################################
 
@@ -31,7 +32,7 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin/
 setopt NONOMATCH
 
 # Script identity
-scriptVersion="1.1.0"
+scriptVersion="1.2.0"
 humanReadableScriptName="Microsoft 365 Reset"
 scriptName="M365R"
 
@@ -764,15 +765,12 @@ function parseOperationCSV() {
     selectedOperations=()
     [[ -z "${csv}" ]] && return 0
 
-    local oldIFS="$IFS"
-    IFS=','
     local op
-    for op in ${csv}; do
+    for op in ${(s:,:)csv}; do
         op="${op// /}"
         [[ -z "${op}" ]] && continue
         addOperationUnique "${op}"
     done
-    IFS="${oldIFS}"
 }
 
 function parseDialogSelections() {
@@ -796,6 +794,15 @@ function parseDialogSelections() {
     fi
 }
 
+function validateOperationIDs() {
+    local op
+    for op in "$@"; do
+        if [[ -z "${operationTitle[${op}]}" ]]; then
+            fatal "Invalid operation ID requested: ${op}"
+        fi
+    done
+}
+
 function showSelectionDialog() {
     if [[ "${operationMode}" == "silent" ]]; then
         parseOperationCSV "${operationCSV}"
@@ -803,18 +810,36 @@ function showSelectionDialog() {
     fi
 
     local checkboxArgs=()
+    local allowedOperations=()
+    local includesRemoveOffice="false"
     local op
     local baseMessage
     local warningMessage=""
     local messageText
     local dialogOutput
     local rc
+    local normalizedOperationCSV="${operationCSV//[[:space:]]/}"
 
-    for op in "${operationIDs[@]}"; do
+    normalizedOperationCSV="${normalizedOperationCSV//,/}"
+
+    if [[ -n "${normalizedOperationCSV}" ]]; then
+        parseOperationCSV "${operationCSV}"
+        validateOperationIDs "${selectedOperations[@]}"
+        allowedOperations=("${selectedOperations[@]}")
+        selectedOperations=()
+    else
+        allowedOperations=("${operationIDs[@]}")
+    fi
+
+    for op in "${allowedOperations[@]}"; do
         checkboxArgs+=(--checkbox "${operationTitle[${op}]},name=${op},icon=${operationIcon[${op}]}")
+        [[ "${op}" == "remove_office" ]] && includesRemoveOffice="true"
     done
 
-    baseMessage="Select one or more reset / removal operations.\n\nNote: Choosing **Completely remove Microsoft 365** suppresses reset-related actions."
+    baseMessage="Select one or more reset / removal operations."
+    if [[ "${includesRemoveOffice}" == "true" ]]; then
+        baseMessage="${baseMessage}\n\nNote: Choosing **Completely remove Microsoft 365** suppresses reset-related actions."
+    fi
 
     while true; do
         messageText="${baseMessage}"
@@ -2594,12 +2619,7 @@ function validateSelectedOperations() {
         return 0
     fi
 
-    local op
-    for op in "${selectedOperations[@]}"; do
-        if [[ -z "${operationTitle[${op}]}" ]]; then
-            fatal "Invalid operation ID requested: ${op}"
-        fi
-    done
+    validateOperationIDs "${selectedOperations[@]}"
 }
 
 function main() {
