@@ -155,8 +155,8 @@ These rules override ad-hoc prompting. Match established `Microsoft-365-Reset.zs
 Apply only for release prep.
 
 1. Keep `scriptVersion` and `VERSION.txt` aligned.
-6. Validate `self-service` and `silent` assumptions end-to-end.
-7. Leave generated self-extracting wrappers untracked unless packaging refresh is explicitly requested.
+2. Validate `self-service` and `silent` assumptions end-to-end.
+3. Leave generated self-extracting wrappers untracked unless packaging refresh is explicitly requested.
 
 
 - A report with zero `Candidate inclusion` items usually means no workflow change is needed.

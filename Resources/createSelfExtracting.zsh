@@ -22,7 +22,7 @@ datestamp=$( date '+%Y-%m-%d-%H%M%S' )
 file_to_self_extracting_script() {
     base64_string=$(base64 -i "$1")
     filename=$(basename "$1")
-    target_path=${2}
+    local target_path="${2:-${TARGET_PATH}}"
     output_script="${SCRIPT_DIR}/${filename}_self-extracting-${datestamp}.sh"
 
     cat <<EOF > "${output_script}"
