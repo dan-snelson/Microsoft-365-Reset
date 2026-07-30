@@ -2,6 +2,14 @@
 
 ## Changelog
 
+### Version 1.3.0b1 (30-Jul-2026)
+- Reviewed [MOFA](https://github.com/cocopuff2u/MOFA) repo
+    - Reclassified deferred app cleanup after repair as MOFA-aligned behavior and narrowed the documented Teams divergences
+    - Ensured `reset_teams_force` installs current Teams when no app bundle exists
+    - Hardened MOFA reporting to validate complete operation wiring and expected runtime metadata before reporting coverage
+- Aligned the selection dialog icon and overlay icon with the intro dialog
+- Pinned seven GitHub Actions to immutable commit SHAs, clearing all Semgrep findings
+
 ### Version 1.2.0 (20-May-2026)
 - Reviewed [MOFA](https://github.com/cocopuff2u/MOFA) repo
 - Reclassified `reset_license` and `reset_credentials` as MOFA-aligned coverage in `scripts/mofa-consult.zsh` instead of intentional divergences

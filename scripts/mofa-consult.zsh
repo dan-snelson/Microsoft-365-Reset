@@ -175,9 +175,90 @@ function extractFeedField() {
     ' "${feedPath}"
 }
 
+function scriptDeclaresOperationID() {
+    local operationID="${1}"
+    /usr/bin/awk -v target_operation="${operationID}" '
+        /^operationIDs=\(/ {
+            in_operation_ids=1
+            next
+        }
+
+        in_operation_ids && /^[[:space:]]*\)/ {
+            in_operation_ids=0
+        }
+
+        in_operation_ids {
+            value=$0
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+            if (value == target_operation) {
+                found=1
+            }
+        }
+
+        END {
+            exit(found ? 0 : 1)
+        }
+    ' "${m365ScriptPath}"
+}
+
+function scriptImplementsOperation() {
+    local operationID="${1}"
+    /usr/bin/grep -Eq "^function op_${operationID}\\(\\) \\{" "${m365ScriptPath}"
+}
+
+function scriptDispatchesOperation() {
+    local operationID="${1}"
+    /usr/bin/grep -Eq "^[[:space:]]*${operationID}\\)[[:space:]]+op_${operationID}[[:space:]]*;;" "${m365ScriptPath}"
+}
+
+function scriptSchedulesOperation() {
+    local operationID="${1}"
+    /usr/bin/awk -v target_operation="${operationID}" '
+        /^function sortOperationsByExecutionPhase\(\) \{/ {
+            in_sort_function=1
+            next
+        }
+
+        in_sort_function {
+            token_pattern="(^|[^[:alnum:]_])" target_operation "([^[:alnum:]_]|$)"
+            if ($0 !~ /^[[:space:]]*#/ && $0 ~ token_pattern) {
+                found=1
+            }
+        }
+
+        in_sort_function && /^}/ {
+            in_sort_function=0
+        }
+
+        END {
+            exit(found ? 0 : 1)
+        }
+    ' "${m365ScriptPath}"
+}
+
 function scriptContainsOperation() {
     local operationID="${1}"
-    /usr/bin/grep -q "function op_${operationID}()" "${m365ScriptPath}"
+    scriptDeclaresOperationID "${operationID}" &&
+        scriptImplementsOperation "${operationID}" &&
+        scriptDispatchesOperation "${operationID}" &&
+        scriptSchedulesOperation "${operationID}"
+}
+
+function scriptContainsLiteral() {
+    local expectedValue="${1}"
+    /usr/bin/awk -v expected_value="${expectedValue}" '
+        /^[[:space:]]*#/ {
+            next
+        }
+
+        index($0, expected_value) > 0 {
+            found=1
+        }
+
+        END {
+            exit(found ? 0 : 1)
+        }
+    ' "${m365ScriptPath}"
 }
 
 function distributionContainsChoice() {
@@ -231,8 +312,8 @@ function appendPackageEraSection() {
             addCandidateItem "${operationID}: expected package-era Distribution choice ${packageChoiceIDForOperation[${operationID}]} is missing"
         elif ! scriptContainsOperation "${operationID}"; then
             classification="Candidate inclusion"
-            note="Package-era Distribution includes this operation, but the local operation is missing from Microsoft-365-Reset.zsh."
-            addCandidateItem "${operationID}: package-era Distribution includes this operation but the local operation is missing"
+            note="Package-era Distribution includes this operation, but the local operation is not fully wired through metadata, implementation, dispatch, and execution ordering."
+            addCandidateItem "${operationID}: package-era Distribution includes this operation but the local operation is not fully wired"
         else
             note="${note} Current local operation remains present."
         fi
@@ -310,6 +391,7 @@ function buildScriptCoverageSection() {
     local localOpLabel
 
     typeset -A mofaScriptPathForOperation
+    typeset -A coveredNoteForOperation
     typeset -A intentionalNoteForOperation
     typeset -A localOnlyReason
 
@@ -354,16 +436,17 @@ function buildScriptCoverageSection() {
     mofaScriptPathForOperation[remove_zoomplugin]="office_reset_tools/mofa_community_maintained/scripts/MOFA_Community_ZoomPlugin_Removal.zsh"
     mofaScriptPathForOperation[remove_webexpt]="office_reset_tools/mofa_community_maintained/scripts/MOFA_Community_WebExPT_Removal.zsh"
 
+    coveredNoteForOperation[reset_word]="Current MOFA repair flow exits without removing configuration data after repair; local deferred cleanup matches that behavior."
+    coveredNoteForOperation[reset_excel]="Current MOFA repair flow exits without removing configuration data after repair; local deferred cleanup matches that behavior."
+    coveredNoteForOperation[reset_powerpoint]="Current MOFA repair flow exits without removing configuration data after repair; local deferred cleanup matches that behavior."
+    coveredNoteForOperation[reset_outlook]="Current MOFA repair flow exits without removing configuration data after repair; local deferred cleanup matches that behavior."
+    coveredNoteForOperation[reset_onenote]="Current MOFA repair flow exits without removing configuration data after repair; local deferred cleanup matches that behavior."
+
     intentionalNoteForOperation[reset_factory]="README parity note: reset_factory performs its own MOFA-style suite cleanup in addition to dependency expansion."
-    intentionalNoteForOperation[reset_word]="README parity note: Word, Excel, PowerPoint, Outlook, and OneNote stop after repair instead of continuing with configuration cleanup."
-    intentionalNoteForOperation[reset_excel]="README parity note: Word, Excel, PowerPoint, Outlook, and OneNote stop after repair instead of continuing with configuration cleanup."
-    intentionalNoteForOperation[reset_powerpoint]="README parity note: Word, Excel, PowerPoint, Outlook, and OneNote stop after repair instead of continuing with configuration cleanup."
-    intentionalNoteForOperation[reset_outlook]="README parity note: Word, Excel, PowerPoint, Outlook, and OneNote stop after repair instead of continuing with configuration cleanup."
-    intentionalNoteForOperation[reset_onenote]="README parity note: Word, Excel, PowerPoint, Outlook, and OneNote stop after repair instead of continuing with configuration cleanup."
-    intentionalNoteForOperation[reset_teams]="README parity note: reset_teams preserves Teams backgrounds, resets Teams TCC state, opens Screen Recording settings in interactive modes, and preserves app bundles unless repair is required."
+    intentionalNoteForOperation[reset_teams]="README parity note: reset_teams suppresses Screen Recording UI in silent mode, preserves legacy Teams bundles during a standard reset, and does not install Teams when the main bundle is absent. Background preservation and TCC reset remain MOFA-aligned."
     intentionalNoteForOperation[reset_autoupdate]="README parity note: AutoUpdate registration treats new Teams as TEAMS21 while keeping classic Teams on the legacy product ID."
 
-    localOnlyReason[reset_teams_force]="Local-only force-reinstall path for Teams."
+    localOnlyReason[reset_teams_force]="Repo-local operation ID exposing the force-reinstall behavior available through MOFA Teams reset's INSTALL=force argument; no separate MOFA script exists."
     localOnlyReason[remove_acrobat_addin]="Local-only Adobe Acrobat add-in cleanup workflow."
 
     appendReportLine "## Script Coverage"
@@ -385,14 +468,16 @@ function buildScriptCoverageSection() {
             addCandidateItem "${operationID}: expected MOFA script missing at ${mofaScriptRelativePath}"
         elif ! scriptContainsOperation "${operationID}"; then
             classification="Candidate inclusion"
-            note="Mapped local operation is not present in Microsoft-365-Reset.zsh."
-            addCandidateItem "${operationID}: mapped MOFA script exists but local operation is missing"
+            note="Mapped local operation is not fully wired through metadata, implementation, dispatch, and execution ordering."
+            addCandidateItem "${operationID}: mapped MOFA script exists but local operation is not fully wired"
         elif [[ -n "${intentionalNoteForOperation[${operationID}]}" ]]; then
             classification="Intentional divergence"
             note="${intentionalNoteForOperation[${operationID}]}"
             addIntentionalItem "${operationID}: ${note}"
+        elif [[ -n "${coveredNoteForOperation[${operationID}]}" ]]; then
+            note="${coveredNoteForOperation[${operationID}]}"
         else
-            note="Mapped MOFA community script is represented by a local operation."
+            note="Mapped MOFA community script is represented by a fully wired local operation."
         fi
 
         appendReportLine "| [$(basename "${mofaScriptRelativePath}")](${mofaScriptURL}) | \`${localOpLabel}\` | ${classification} | $(escapeForMarkdown "${note}") |"
@@ -409,8 +494,8 @@ function buildScriptCoverageSection() {
     for operationID in "${localOnlyOperations[@]}"; do
         note="${localOnlyReason[${operationID}]}"
         if ! scriptContainsOperation "${operationID}"; then
-            note="Expected local-only operation is missing from Microsoft-365-Reset.zsh."
-            addCandidateItem "${operationID}: expected local-only operation is missing from Microsoft-365-Reset.zsh"
+            note="Expected local-only operation is not fully wired through metadata, implementation, dispatch, and execution ordering."
+            addCandidateItem "${operationID}: expected local-only operation is not fully wired in Microsoft-365-Reset.zsh"
             classification="Candidate inclusion"
         else
             classification="Local-only operation"
@@ -508,40 +593,68 @@ function buildFeedComparisonSection() {
         note=""
         fallbackNote=""
 
+        if [[ -n "${localPrimary}" ]] && ! scriptContainsLiteral "${localPrimary}"; then
+            classification="Candidate inclusion"
+            note="Expected local primary repair URL is not present in Microsoft-365-Reset.zsh; report metadata may be stale."
+            addCandidateItem "${displayName}: expected local primary repair URL is not present in Microsoft-365-Reset.zsh"
+        fi
+
+        if [[ -n "${localFallback}" ]] && ! scriptContainsLiteral "${localFallback}"; then
+            classification="Candidate inclusion"
+            note="${note}${note:+ }Expected local fallback repair URL is not present in Microsoft-365-Reset.zsh; report metadata may be stale."
+            addCandidateItem "${displayName}: expected local fallback repair URL is not present in Microsoft-365-Reset.zsh"
+        fi
+
+        if [[ -n "${localApplicationID}" ]] && ! scriptContainsLiteral "${localApplicationID}"; then
+            classification="Candidate inclusion"
+            note="${note}${note:+ }Expected local application ID is not present in Microsoft-365-Reset.zsh; report metadata may be stale."
+            addCandidateItem "${displayName}: expected local application ID ${localApplicationID} is not present in Microsoft-365-Reset.zsh"
+        fi
+
+        if [[ -n "${localThreshold}" ]] && ! scriptContainsLiteral "${localThreshold}"; then
+            classification="Candidate inclusion"
+            note="${note}${note:+ }Expected local minimum-version threshold is not present in Microsoft-365-Reset.zsh; report metadata may be stale."
+            addCandidateItem "${displayName}: expected local minimum-version threshold ${localThreshold} is not present in Microsoft-365-Reset.zsh"
+        fi
+
         if [[ -z "${feedFullVersion}" ]]; then
-            classification="Skipped"
-            note="MOFA stable feed does not publish ${displayName} in macos_standalone_latest.json; local comparison was skipped."
+            if [[ "${classification}" == "Candidate inclusion" ]]; then
+                note="${note}${note:+ }MOFA stable feed does not publish ${displayName} in macos_standalone_latest.json; feed comparison was skipped."
+            else
+                classification="Skipped"
+                note="MOFA stable feed does not publish ${displayName} in macos_standalone_latest.json; local comparison was skipped."
+            fi
             appendReportLine "| ${displayName} | ${classification} | $(escapeForMarkdown "${note}") |"
             continue
         fi
 
         if [[ "${feedPrimaryURL}" != "${localPrimary}" ]]; then
             classification="Candidate inclusion"
-            note="Primary repair URL differs. Local: ${localPrimary}; MOFA stable feed: ${feedPrimaryURL}."
+            note="${note}${note:+ }Primary repair URL differs. Local: ${localPrimary}; MOFA stable feed: ${feedPrimaryURL}."
             addCandidateItem "${displayName}: primary repair URL differs from MOFA stable feed"
         else
-            note="Primary repair URL matches MOFA stable feed."
+            note="${note}${note:+ }Primary repair URL matches MOFA stable feed."
         fi
 
         if [[ -n "${localApplicationID}" && "${feedApplicationID}" != "${localApplicationID}" ]]; then
             classification="Candidate inclusion"
-            note="${note} Application ID differs. Local: ${localApplicationID}; MOFA stable feed: ${feedApplicationID}."
+            note="${note}${note:+ }Application ID differs. Local: ${localApplicationID}; MOFA stable feed: ${feedApplicationID}."
             addCandidateItem "${displayName}: application ID differs from MOFA stable feed"
         elif [[ -n "${localApplicationID}" ]]; then
-            note="${note} Application ID matches ${localApplicationID}."
+            note="${note}${note:+ }Application ID matches ${localApplicationID}."
         fi
 
         if [[ -n "${localFallback}" && -n "${feedAppOnlyURL}" && "${feedAppOnlyURL}" != "N/A" ]]; then
-            fallbackNote=" Local fallback repair URL remains hard-coded as ${localFallback}; MOFA stable feed publishes the app-only package as ${feedAppOnlyURL}."
-            note="${note}${fallbackNote}"
+            fallbackNote="Local fallback repair URL remains hard-coded as ${localFallback}; MOFA stable feed publishes the app-only package as ${feedAppOnlyURL}."
+            note="${note}${note:+ }${fallbackNote}"
         fi
 
         if [[ -n "${localThreshold}" ]]; then
             if is-at-least "${localThreshold}" "${feedFullVersion}"; then
-                note="${note} Current MOFA version ${feedFullVersion} remains above the local minimum threshold ${localThreshold}."
+                note="${note}${note:+ }Current MOFA version ${feedFullVersion} remains above the local minimum threshold ${localThreshold}."
             else
                 classification="Candidate inclusion"
-                note="${note} Current MOFA version ${feedFullVersion} is below the local minimum threshold ${localThreshold}."
+                note="${note}${note:+ }Current MOFA version ${feedFullVersion} is below the local minimum threshold ${localThreshold}."
                 addCandidateItem "${displayName}: current MOFA version ${feedFullVersion} is below local threshold ${localThreshold}"
             fi
         fi
@@ -577,6 +690,7 @@ function writeReport() {
         print -r -- "- Candidate inclusion items: ${candidateCount}"
         print -r -- "- Intentional divergences: ${intentionalCount}"
         print -r -- "- Local-only operations: ${localOnlyCount}"
+        print -r -- "- Scope: structural operation wiring and feed metadata; semantic parity still requires implementation review"
         print -r -- ""
 
         for line in "${reportLines[@]}"; do

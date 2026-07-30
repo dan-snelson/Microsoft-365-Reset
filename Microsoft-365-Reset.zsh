@@ -12,11 +12,13 @@
 #
 # HISTORY
 #
-# Version 1.2.0, 20-May-2026, Dan K. Snelson (@dan-snelson)
-# - Reclassified `reset_license` and `reset_credentials` as MOFA-aligned coverage in `scripts/mofa-consult.zsh` instead of intentional divergences
-# - Clarified `README.md` MOFA notes to separate aligned behavior, intentional divergences, and repo-local operations
-# - Fixed `--operations` / Jamf `$5` CSV parsing so comma-separated operation IDs execute as separate selections in `silent` mode (Addresses #16; thanks for the detailed report and recommended fix, @meschwartz!)
-# - Constrained interactive operation picker to CSV-listed operations when `--operations` / Jamf `$5` is provided in `self-service`, `test`, or `debug` mode (Addresses #15; thanks for the suggestion, @andreilabin!)
+# Version 1.3.0b1, 30-Jul-2026, Dan K. Snelson (@dan-snelson)
+# - Reviewed [MOFA](https://github.com/cocopuff2u/MOFA) repo
+#   - Reclassified deferred app cleanup after repair as MOFA-aligned behavior and narrowed the documented Teams divergences
+#   - Ensured `reset_teams_force` installs current Teams when no app bundle exists
+#   - Hardened MOFA reporting to validate complete operation wiring and expected runtime metadata before reporting coverage
+# - Aligned the selection dialog icon and overlay icon with the intro dialog
+# - Pinned seven GitHub Actions to immutable commit SHAs, clearing all Semgrep findings
 #
 ####################################################################################################
 
@@ -32,7 +34,7 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin/
 setopt NONOMATCH
 
 # Script identity
-scriptVersion="1.2.0"
+scriptVersion="1.3.0b1"
 humanReadableScriptName="Microsoft 365 Reset"
 scriptName="M365R"
 
@@ -192,7 +194,7 @@ operationDescription[reset_onenote]="Closes Microsoft OneNote, checks for damage
 operationDescription[remove_onenote_data]="Closes Microsoft OneNote and removes cached data. Warning: This will remove any content that has not synchronized with the cloud."
 operationDescription[reset_onedrive]="Closes Microsoft OneDrive, checks for damage and performs repairs as necessary. Resets caches and configuration data. This will not remove your synchronized OneDrive files."
 operationDescription[reset_teams]="Closes Microsoft Teams, checks for damage and performs repairs as necessary. Resets caches, credentials and configuration data."
-operationDescription[reset_teams_force]="Closes Microsoft Teams, removes the current Teams app bundle, reinstalls the latest version, and then resets Teams caches, credentials and configuration data."
+operationDescription[reset_teams_force]="Closes Microsoft Teams, removes any installed Teams app bundles, installs the latest current Teams version, and then resets Teams caches, credentials and configuration data."
 operationDescription[reset_autoupdate]="Resets Microsoft AutoUpdate to default settings and installs the latest version of the tool."
 operationDescription[reset_license]="Closes all apps and removes Office licensing files plus core Office identity data without the broader Teams and OneDrive sign-in cleanup."
 operationDescription[reset_credentials]="Closes all apps and removes the Office license files. Sign-in credentials and cached tokens are removed from keychain."
@@ -658,7 +660,7 @@ function maybeRepairOfficeApp() {
     fi
 
     if [[ "${repairPerformed}" == "true" ]]; then
-        info "${appName} repair completed; skipping configuration cleanup for this run as a documented divergence from MOFA"
+        info "${appName} repair completed; skipping configuration cleanup for this run to match current MOFA behavior"
         return 2
     fi
 
@@ -852,7 +854,8 @@ function showSelectionDialog() {
             --infotext "${scriptVersion}" \
             --messagefont "size=${fontSize}" \
             --message "${messageText}" \
-            --icon "https://usw2.ics.services.jamfcloud.com/icon/hash_a0bc0557b531bc5d2713dece4f513df1ac5038ff55ebf5115edf43b951f916c7" \
+            --icon "${applicationIcon}" \
+            --overlayicon "${organizationOverlayiconURL}" \
             --checkboxstyle "switch,large" \
             --json \
             --button1text "Run" \
@@ -1957,7 +1960,7 @@ function resetTeamsOperation() {
     local teamsBackgroundArchive="${loggedInUserHome}/Teams_Old_Backgrounds"
     local installAttempt=1
     local installationRetries=5
-    local shouldInstallTeams="false"
+    local shouldInstallTeams="${forceReinstall}"
     osVersion="$(sw_vers -productVersion)"
 
     pkill -9 'MSTeams' 2>/dev/null

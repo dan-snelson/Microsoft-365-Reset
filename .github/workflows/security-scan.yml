@@ -38,7 +38,7 @@ jobs:
     steps:
       - name: Check Out Repository
         # Fetch full history so diff-aware scans and code scanning uploads have the right context.
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
 
@@ -46,7 +46,7 @@ jobs:
         id: semgrep_action
         # Requested official action. It is archived upstream, so a CLI step below handles SARIF export.
         continue-on-error: true
-        uses: semgrep/semgrep-action@v1
+        uses: semgrep/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d # v1
         env:
           SEMGREP_BASELINE_COMMIT: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
         with:
@@ -121,7 +121,7 @@ jobs:
         id: upload_sarif
         if: hashFiles('semgrep.sarif') != ''
         # Repo Actions permissions must allow SARIF uploads or this step will fail even with security-events: write.
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
         with:
           sarif_file: semgrep.sarif
           category: semgrep
@@ -167,14 +167,14 @@ jobs:
     steps:
       - name: Check Out Repository
         # Fetch full history so Gitleaks can scan past commits on protected branches.
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
 
       - name: Run Gitleaks (Blocking)
         id: gitleaks_scan
         continue-on-error: true
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_COMMENTS: "true"
@@ -213,7 +213,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check Out Repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
 
@@ -286,7 +286,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check Out Repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
 
