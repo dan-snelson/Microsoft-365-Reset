@@ -1072,7 +1072,7 @@ function finishProgressDialog() {
 function showCompletionDialog() {
     [[ "${operationMode}" == "silent" ]] && return 0
 
-    local summary="**Results**<br><br>- Completed operations: ${#completedOperations[@]}<br>- Failed operations: ${#failedOperations[@]}<br>- Elapsed Time: $(formattedElapsedTime)"
+    local summary="**Results:**<br><br>- Completed operations: ${#completedOperations[@]}<br>- Failed operations: ${#failedOperations[@]}<br><br>**Elapsed Time:** $(formattedElapsedTime)"
     local repairedTitles=()
     local op
 
