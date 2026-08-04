@@ -12,7 +12,7 @@
 #
 # HISTORY
 #
-# Version 1.3.0b1, 30-Jul-2026, Dan K. Snelson (@dan-snelson)
+# Version 1.3.0, 04-Aug-2026, Dan K. Snelson (@dan-snelson)
 # - Reviewed [MOFA](https://github.com/cocopuff2u/MOFA) repo
 #   - Reclassified deferred app cleanup after repair as MOFA-aligned behavior and narrowed the documented Teams divergences
 #   - Ensured `reset_teams_force` installs current Teams when no app bundle exists
@@ -34,7 +34,7 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin/
 setopt NONOMATCH
 
 # Script identity
-scriptVersion="1.3.0b1"
+scriptVersion="1.3.0"
 humanReadableScriptName="Microsoft 365 Reset"
 scriptName="M365R"
 

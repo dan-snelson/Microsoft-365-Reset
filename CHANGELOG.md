@@ -2,7 +2,7 @@
 
 ## Changelog
 
-### Version 1.3.0b1 (30-Jul-2026)
+### Version 1.3.0 (04-Aug-2026)
 - Reviewed [MOFA](https://github.com/cocopuff2u/MOFA) repo
     - Reclassified deferred app cleanup after repair as MOFA-aligned behavior and narrowed the documented Teams divergences
     - Ensured `reset_teams_force` installs current Teams when no app bundle exists
