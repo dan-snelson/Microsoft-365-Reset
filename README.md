@@ -1,8 +1,8 @@
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/dan-snelson/Microsoft-365-Reset?display_name=tag) ![GitHub issues](https://img.shields.io/github/issues-raw/dan-snelson/Microsoft-365-Reset) ![GitHub closed issues](https://img.shields.io/github/issues-closed-raw/dan-snelson/Microsoft-365-Reset) ![GitHub pull requests](https://img.shields.io/github/issues-pr-raw/dan-snelson/Microsoft-365-Reset) ![GitHub closed pull requests](https://img.shields.io/github/issues-pr-closed-raw/dan-snelson/Microsoft-365-Reset) [![swiftDialog](https://img.shields.io/badge/swiftDialog-Enabled-blue)](https://swiftdialog.app) [![Semgrep Security Scan](https://img.shields.io/badge/security%20scanned%20by-Semgrep-00C7B7?style=flat&logo=semgrep&logoColor=white)](https://semgrep.dev)
 
-# Microsoft 365 Reset (1.2.0)
+# Microsoft 365 Reset (1.3.0)
 
-<img src="images/Microsoft_365_Reset_Hero.png" alt="Version 1.2.0" width="600" />
+<img src="images/Microsoft_365_Reset_Hero.png" alt="Version 1.3.0" width="600" />
 
 Unified `zsh` script to repair, reset, or remove Microsoft 365 components on macOS:
 
@@ -25,18 +25,19 @@ The script consolidates expanded package workflows into one root-run tool with:
 [MOFA](https://mofa.cocolabs.dev/macos_tools/microsoft_office_repair_tools.html) alignment notes:
 
 - Separate `reset_license` and `reset_credentials` operations align with MOFA's separate license-only and broader sign-in reset flows
+- App repair/reinstall flows for Word, Excel, PowerPoint, Outlook, and OneNote stop after repair without continuing into configuration cleanup, matching current MOFA behavior
+- Teams background preservation, TCC reset, and retention of a valid current Teams app bundle align with current MOFA behavior
 
 Intentional divergences from current MOFA behavior:
 
 - `reset_factory` performs its own MOFA-style suite cleanup in addition to dependency expansion
-- App repair/reinstall flows for Word, Excel, PowerPoint, Outlook, and OneNote now stop after repair instead of continuing with configuration cleanup in the same run
-- `reset_teams` preserves Teams backgrounds, resets Teams TCC state, and opens Screen Recording settings in interactive modes
-- `reset_teams` preserves installed Teams app bundles unless repair is required; `reset_teams_force` performs the explicit app removal and reinstall path
-- Teams reset and AutoUpdate registration now treat new Teams as the current `TEAMS21` product while keeping classic Teams on the legacy product ID
+- `reset_teams` suppresses Screen Recording settings in `silent` mode, preserves classic and work-or-school Teams bundles during a standard reset, and does not install current Teams when its main app bundle is absent
+- AutoUpdate registration treats new Teams as the current `TEAMS21` product while keeping classic Teams on the legacy product ID
 
 Repo-local operations without current MOFA community-script equivalents:
 
-- `reset_teams_force` and `remove_acrobat_addin` remain repo-local workflows without current MOFA community-script equivalents
+- `reset_teams_force` is a repo-local operation ID that exposes the force-reinstall behavior available through MOFA Teams reset's `INSTALL=force` argument; MOFA does not provide a separate force-reset script
+- `remove_acrobat_addin` remains a repo-local workflow without a current MOFA community-script equivalent
 
 ## Screenshots
 
@@ -120,8 +121,8 @@ Use these IDs in `--operations` CSV for silent execution or interactive chooser 
 | `reset_onenote` | OneNote repair/reinstall when needed, or container/group cleanup when no repair occurs |
 | `remove_onenote_data` | Remove OneNote cached local data |
 | `reset_onedrive` | OneDrive repair checks + cache/container/keychain cleanup |
-| `reset_teams` | Teams reset with app validation/repair when needed + Teams cache/container/keychain cleanup |
-| `reset_teams_force` | Force-remove and reinstall Teams, then perform Teams cache/container/keychain cleanup |
+| `reset_teams` | Teams reset with installed-app validation/repair + Teams cache/container/keychain cleanup; leaves current Teams absent when no main app bundle exists |
+| `reset_teams_force` | Force-remove installed Teams variants, install current Teams even when its main bundle was absent, then perform Teams cache/container/keychain cleanup |
 | `reset_autoupdate` | Reset MAU prefs/cache and reinstall/update MAU when applicable |
 | `reset_license` | Reset Office licensing files and core Office identity data |
 | `reset_credentials` | Remove Office licensing/sign-in artifacts and token/keychain data |
@@ -293,6 +294,8 @@ The report uses `Covered`, `Candidate inclusion`, `Intentional divergence`, `Loc
 - MOFA stable feed metadata from `latest_raw_files/macos_standalone_latest.json`
 - Hard-coded local repair links, MAU application IDs, and current minimum-version thresholds for Teams and MAU
 - Resolved `file://` links back to the sibling MOFA scripts referenced by the report
+
+Local operation coverage requires the operation ID, implementation function, dispatcher entry, and deterministic execution-phase entry. Expected local repair URLs, application IDs, and minimum-version thresholds must also remain present in `Microsoft-365-Reset.zsh`. These are structural and metadata checks; semantic parity still requires implementation review.
 
 ## Exit Codes
 
