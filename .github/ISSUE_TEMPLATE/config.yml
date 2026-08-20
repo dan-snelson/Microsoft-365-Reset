@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Microsoft 365 Reset README
+    url: https://github.com/dan-snelson/Microsoft-365-Reset/blob/main/README.md
+    about: Review usage, modes, operation IDs, dependency rules, and maintainer MOFA workflow before filing.
+  - name: Security Policy
+    url: https://github.com/dan-snelson/Microsoft-365-Reset/blob/main/SECURITY.md
+    about: Report vulnerabilities privately instead of opening public issues.
+  - name: swiftDialog upstream issues
+    url: https://github.com/swiftDialog/swiftDialog/issues
+    about: File dialog-engine issues that are outside Microsoft 365 Reset itself.
+  - name: MOFA reset tools reference
+    url: https://mofa.cocolabs.dev/macos_tools/microsoft_office_repair_tools.html
+    about: Review current MOFA behavior when reporting parity questions or reset-workflow drift.

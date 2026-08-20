@@ -1,0 +1,171 @@
+name: Bug Report
+description: Something looks broken in Microsoft 365 Reset
+title: "[Bug]: "
+labels: ["bug"]
+assignees: "dan-snelson"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for filing a bug report for Microsoft 365 Reset.
+
+        Please fill this out with enough detail to reproduce the issue against script mode, operation ordering, and log output.
+
+        Before filing, retest with a fresh copy of the latest release or current `main` branch unless a maintainer asked for a different build:
+
+        ```zsh
+        timestamp=$( date '+%Y-%m-%d-%H%M%S' )
+        curl -L -o ~/Downloads/Microsoft-365-Reset-$timestamp.zsh https://raw.githubusercontent.com/dan-snelson/Microsoft-365-Reset/main/Microsoft-365-Reset.zsh
+        sudo zsh ~/Downloads/Microsoft-365-Reset-$timestamp.zsh --mode debug
+        ```
+
+        If the problem is automation-only, rerun the same `--mode silent --operations ...` invocation you used originally.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you submit
+      options:
+        - label: I reproduced this with the latest release or current `main` branch version available to me, or I explain below why I could not.
+          required: true
+        - label: I included sanitized script logs from `/var/log/org.churchofjesuschrist.log`, or I explain below why I could not.
+          required: true
+        - label: I reviewed open swiftDialog issues when this looks related to dialog rendering, window behavior, or button handling.
+          required: true
+
+  - type: input
+    id: installed-macos-version
+    attributes:
+      label: Installed macOS version
+      description: From About This Mac or `sw_vers -productVersion`
+      placeholder: "e.g. 26.6.2"
+    validations:
+      required: true
+
+  - type: input
+    id: script-version
+    attributes:
+      label: Microsoft 365 Reset version tested
+      description: Which release, version, or commit did you run?
+      placeholder: "e.g. 1.3.0 or main @ abc1234"
+    validations:
+      required: true
+
+  - type: input
+    id: swiftdialog-version
+    attributes:
+      label: swiftDialog version
+      description: From `/usr/local/bin/dialog --version`
+      placeholder: "e.g. 3.1.1.4995"
+
+  - type: dropdown
+    id: execution-path
+    attributes:
+      label: How was Microsoft 365 Reset launched?
+      options:
+        - Terminal
+        - Jamf Pro policy
+        - Jamf Self Service
+        - Other MDM workflow
+        - More than one path
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operation-mode
+    attributes:
+      label: Operation mode
+      description: Which mode exposed the issue?
+      options:
+        - self-service
+        - silent
+        - test
+        - debug
+        - More than one mode
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected-area
+    attributes:
+      label: Which area looks broken?
+      options:
+        - Pre-flight or dependency checks
+        - swiftDialog UI or picker flow
+        - Silent mode parsing or `--operations`
+        - Dependency resolution or operation ordering
+        - Destructive confirmation flow
+        - Microsoft app repair or reinstall
+        - Microsoft 365 reset or cleanup behavior
+        - Microsoft 365 removal behavior
+        - Acrobat add-in removal
+        - MOFA parity or maintainer report
+        - Logging or exit codes
+        - Documentation or examples
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: operation-ids
+    attributes:
+      label: Operation ID(s)
+      description: List selected or supplied operation IDs.
+      placeholder: "e.g. reset_factory, reset_teams_force, remove_acrobat_addin"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe actual behavior.
+      placeholder: |
+        Example: Silent mode accepted `reset_factory`, but app repair completed and the expected deferred-cleanup log line was missing.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: What did you expect to happen?
+      placeholder: |
+        Example: Operation should run dependency expansion, perform repair, and log that app-specific cleanup is deferred to a later run.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps help.
+      placeholder: |
+        1. Launch Microsoft 365 Reset from Terminal, Jamf Pro, or Self Service
+        2. Include exact command, Jamf parameter mapping, or policy trigger
+        3. Note mode: `self-service`, `silent`, `test`, or `debug`
+        4. Include selected operation IDs or exact `--operations` CSV
+        5. Observe unexpected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic artifacts
+      description: Drag in sanitized logs, screenshots, Terminal output, or other proof.
+      placeholder: |
+        Helpful artifacts:
+        - Sanitized `/var/log/org.churchofjesuschrist.log`
+        - Relevant `/var/log/install.log` excerpts if repair or reinstall was involved
+        - Full Terminal command, Jamf parameters, or policy trigger
+        - `zsh -x` output, if captured
+        - Screenshots of selection, destructive confirmation, progress, or completion dialogs
+        - Notes about affected Microsoft apps
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Anything else
+      description: Add environment notes, workarounds, or dependency context that does not fit above.
