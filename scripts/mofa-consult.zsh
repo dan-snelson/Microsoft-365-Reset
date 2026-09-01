@@ -389,6 +389,11 @@ function buildScriptCoverageSection() {
     local mofaScriptPath
     local mofaScriptURL
     local localOpLabel
+    local discoveredScriptPath
+    local discoveredScriptRelativePath
+    local discoveredScriptURL
+    local mappedOperationID
+    local isMapped
 
     typeset -A mofaScriptPathForOperation
     typeset -A coveredNoteForOperation
@@ -442,7 +447,7 @@ function buildScriptCoverageSection() {
     coveredNoteForOperation[reset_outlook]="Current MOFA repair flow exits without removing configuration data after repair; local deferred cleanup matches that behavior."
     coveredNoteForOperation[reset_onenote]="Current MOFA repair flow exits without removing configuration data after repair; local deferred cleanup matches that behavior."
 
-    intentionalNoteForOperation[reset_factory]="README parity note: reset_factory performs its own MOFA-style suite cleanup in addition to dependency expansion."
+    intentionalNoteForOperation[reset_factory]="README parity note: reset_factory directly performs MOFA-aligned suite cleanup and intentionally adds package-era dependency expansion."
     intentionalNoteForOperation[reset_teams]="README parity note: reset_teams suppresses Screen Recording UI in silent mode, preserves legacy Teams bundles during a standard reset, and does not install Teams when the main bundle is absent. Background preservation and TCC reset remain MOFA-aligned."
     intentionalNoteForOperation[reset_autoupdate]="README parity note: AutoUpdate registration treats new Teams as TEAMS21 while keeping classic Teams on the legacy product ID."
 
@@ -481,6 +486,25 @@ function buildScriptCoverageSection() {
         fi
 
         appendReportLine "| [$(basename "${mofaScriptRelativePath}")](${mofaScriptURL}) | \`${localOpLabel}\` | ${classification} | $(escapeForMarkdown "${note}") |"
+    done
+
+    for discoveredScriptPath in "${mofaRepoPath}/office_reset_tools/mofa_community_maintained/scripts"/MOFA_Community_*.zsh(N); do
+        discoveredScriptRelativePath="${discoveredScriptPath#${mofaRepoPath}/}"
+        isMapped="false"
+
+        for mappedOperationID in "${mappedOperations[@]}"; do
+            if [[ "${mofaScriptPathForOperation[${mappedOperationID}]}" == "${discoveredScriptRelativePath}" ]]; then
+                isMapped="true"
+                break
+            fi
+        done
+
+        [[ "${isMapped}" == "true" ]] && continue
+
+        discoveredScriptURL="$(pathToFileURL "${discoveredScriptPath}")"
+        note="Current MOFA community script has no local operation mapping; semantic review is required."
+        addCandidateItem "unmapped MOFA script: ${discoveredScriptRelativePath}"
+        appendReportLine "| [$(basename "${discoveredScriptRelativePath}")](${discoveredScriptURL}) | _Unmapped_ | Candidate inclusion | $(escapeForMarkdown "${note}") |"
     done
 
     appendPackageEraSection

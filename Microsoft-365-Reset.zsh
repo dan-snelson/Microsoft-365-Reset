@@ -12,13 +12,9 @@
 #
 # HISTORY
 #
-# Version 1.3.0, 04-Aug-2026, Dan K. Snelson (@dan-snelson)
+# Version 1.4.0b1, 20-Aug-2026, Dan K. Snelson (@dan-snelson)
 # - Reviewed [MOFA](https://github.com/cocopuff2u/MOFA) repo
-#   - Reclassified deferred app cleanup after repair as MOFA-aligned behavior and narrowed the documented Teams divergences
-#   - Ensured `reset_teams_force` installs current Teams when no app bundle exists
-#   - Hardened MOFA reporting to validate complete operation wiring and expected runtime metadata before reporting coverage
-# - Aligned the selection dialog icon and overlay icon with the intro dialog
-# - Pinned seven GitHub Actions to immutable commit SHAs, clearing all Semgrep findings
+# - Added an admin-configurable silent-mode force-quit skip list `silentSkipForceQuitOps` (Feature Request #20)
 #
 ####################################################################################################
 
@@ -34,7 +30,7 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin/
 setopt NONOMATCH
 
 # Script identity
-scriptVersion="1.3.0"
+scriptVersion="1.4.0b1"
 humanReadableScriptName="Microsoft 365 Reset"
 scriptName="M365R"
 
@@ -229,6 +225,12 @@ operationIcon[remove_webexpt]="https://usw2.ics.services.jamfcloud.com/icon/hash
 
 autoRepairOps=(reset_word reset_excel reset_powerpoint reset_outlook reset_onenote reset_onedrive reset_teams reset_teams_force reset_autoupdate)
 
+# Operation IDs whose silent-mode preparation paths call shouldSkipForceQuit.
+# Currently supported: remove_acrobat_addin.
+silentSkipForceQuitOps=(
+    remove_acrobat_addin
+)
+
 
 
 ####################################################################################################
@@ -332,6 +334,18 @@ function hasOperation() {
     local op="$1"
     local item
     for item in "${selectedOperations[@]}"; do
+        [[ "${item}" == "${op}" ]] && return 0
+    done
+    return 1
+}
+
+function shouldSkipForceQuit() {
+    local op="$1"
+    local item
+
+    [[ "${operationMode}" == "silent" ]] || return 1
+
+    for item in "${silentSkipForceQuitOps[@]}"; do
         [[ "${item}" == "${op}" ]] && return 0
     done
     return 1
@@ -1192,6 +1206,11 @@ function waitForInteractiveAppQuit() {
 
 function prepareForAcrobatAddinRemoval() {
     if [[ "${operationMode}" == "silent" ]]; then
+        if shouldSkipForceQuit "remove_acrobat_addin"; then
+            info "Silent mode: skipping force-quit of Word, Excel, PowerPoint, and Acrobat for remove_acrobat_addin"
+            return 0
+        fi
+
         info "Silent mode: force-stopping Word, Excel, PowerPoint, and Acrobat before add-in removal"
         pkill -9 'Microsoft Word' 2>/dev/null
         pkill -9 'Microsoft Excel' 2>/dev/null

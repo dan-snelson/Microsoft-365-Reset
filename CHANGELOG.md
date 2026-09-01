@@ -2,6 +2,10 @@
 
 ## Changelog
 
+### Version 1.4.0b1 (20-Aug-2026)
+- Reviewed [MOFA](https://github.com/cocopuff2u/MOFA) repo
+- Added an admin-configurable silent-mode force-quit skip list `silentSkipForceQuitOps` (Feature Request #20)
+
 ### Version 1.3.0 (04-Aug-2026)
 - Reviewed [MOFA](https://github.com/cocopuff2u/MOFA) repo
     - Reclassified deferred app cleanup after repair as MOFA-aligned behavior and narrowed the documented Teams divergences
