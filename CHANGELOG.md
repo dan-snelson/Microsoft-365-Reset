@@ -2,7 +2,7 @@
 
 ## Changelog
 
-### Version 1.4.0b1 (20-Aug-2026)
+### Version 1.4.0b1 (01-Sep-2026)
 - Reviewed [MOFA](https://github.com/cocopuff2u/MOFA) repo
 - Added an admin-configurable silent-mode force-quit skip list `silentSkipForceQuitOps` (Feature Request #20)
 
