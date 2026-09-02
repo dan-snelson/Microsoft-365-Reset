@@ -225,7 +225,8 @@ operationIcon[remove_webexpt]="https://usw2.ics.services.jamfcloud.com/icon/hash
 
 autoRepairOps=(reset_word reset_excel reset_powerpoint reset_outlook reset_onenote reset_onedrive reset_teams reset_teams_force reset_autoupdate)
 
-# Operation IDs whose silent-mode preparation paths call shouldSkipForceQuit.
+# Silent-mode skip list for supported preparation force-quit blocks.
+# Only preparation paths that call shouldSkipForceQuit honor this list.
 # Currently supported: remove_acrobat_addin.
 silentSkipForceQuitOps=(
     remove_acrobat_addin
