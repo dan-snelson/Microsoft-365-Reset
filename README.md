@@ -1,8 +1,8 @@
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/dan-snelson/Microsoft-365-Reset?display_name=tag) ![GitHub issues](https://img.shields.io/github/issues-raw/dan-snelson/Microsoft-365-Reset) ![GitHub closed issues](https://img.shields.io/github/issues-closed-raw/dan-snelson/Microsoft-365-Reset) ![GitHub pull requests](https://img.shields.io/github/issues-pr-raw/dan-snelson/Microsoft-365-Reset) ![GitHub closed pull requests](https://img.shields.io/github/issues-pr-closed-raw/dan-snelson/Microsoft-365-Reset) [![swiftDialog](https://img.shields.io/badge/swiftDialog-Enabled-blue)](https://swiftdialog.app) [![Semgrep Security Scan](https://img.shields.io/badge/security%20scanned%20by-Semgrep-00C7B7?style=flat&logo=semgrep&logoColor=white)](https://semgrep.dev)
 
-# Microsoft 365 Reset (1.3.0)
+# Microsoft 365 Reset (1.4.0)
 
-<img src="images/Microsoft_365_Reset_Hero.png" alt="Version 1.3.0" width="600" />
+<img src="images/Microsoft_365_Reset_Hero.png" alt="Microsoft 365 Reset" width="600" />
 
 Unified `zsh` script to repair, reset, or remove Microsoft 365 components on macOS:
 
@@ -30,7 +30,7 @@ The script consolidates expanded package workflows into one root-run tool with:
 
 Intentional divergences from current MOFA behavior:
 
-- `reset_factory` performs its own MOFA-style suite cleanup in addition to dependency expansion
+- `reset_factory` directly performs MOFA-aligned suite cleanup and intentionally adds package-era dependency expansion
 - `reset_teams` suppresses Screen Recording settings in `silent` mode, preserves classic and work-or-school Teams bundles during a standard reset, and does not install current Teams when its main app bundle is absent
 - AutoUpdate registration treats new Teams as the current `TEAMS21` product while keeping classic Teams on the legacy product ID
 
@@ -43,25 +43,24 @@ Repo-local operations without current MOFA community-script equivalents:
 
 <table>
   <tr>
-    <td><img src="images/M365R-00001.png" alt="M365R-00001"></td>
-    <td><img src="images/M365R-00002.png" alt="M365R-00002"></td>
-    <td><img src="images/M365R-00003.png" alt="M365R-00003"></td>
+    <td><img src="images/M365R-00001.png" alt="Welcome"></td>
+    <td><img src="images/M365R-00002.png" alt="Selection (all disabled)"></td>
+    <td><img src="images/M365R-00003.png" alt="Selection (one selected)"></td>
   </tr>
   <tr>
-    <td><img src="images/M365R-00004.png" alt="M365R-00004"></td>
-    <td><img src="images/M365R-00005.png" alt="M365R-00005"></td>
-    <td><img src="images/M365R-00006.png" alt="M365R-00006"></td>
+    <td><img src="images/M365R-00004.png" alt="Confirm Destructive Actions (prompt)"></td>
+    <td><img src="images/M365R-00005.png" alt="Confirm Destructive Actions (accepted)"></td>
+    <td><img src="images/M365R-00006.png" alt="Operation in progress"></td>
   </tr>
   <tr>
-    <td><img src="images/M365R-00007.png" alt="M365R-00007"></td>
-    <td><img src="images/M365R-00008.png" alt="M365R-00008"></td>
-    <td><img src="images/M365R-00009.png" alt="M365R-00009"></td>
+    <td><img src="images/M365R-00007.png" alt="Operation completed"></td>
+    <td><img src="images/M365R-00008.png" alt="Restart Recommended"></td>
+    <td><img src="images/M365R-00009.png" alt="Are you sure you want to restart your computer now?"></td>
   </tr>
 </table>
 
 ## Requirements
 
-- macOS with `zsh`
 - Root execution (`sudo` or MDM root context)
 - Active non-root console user session (script exits during preflight if none is detected)
 - Network access for swiftDialog install/upgrade in interactive modes and Microsoft package download during auto-repair operations
@@ -69,7 +68,7 @@ Repo-local operations without current MOFA community-script equivalents:
 
 Important:
 
-- Default log path is `/var/log/org.churchofjesuschrist.log` and requires root.
+- Default log path is `/var/log/org.churchofjesuschrist.log` and requires root; edit the `scriptLog` variable for your environment
 
 ## Usage
 
@@ -141,7 +140,7 @@ The script enforces package-equivalent dependencies:
 - Selecting `reset_credentials` suppresses `reset_license`
 - Selecting `reset_teams_force` suppresses `reset_teams`
 - `remove_acrobat_addin` runs as a standalone operation with no dependency expansion or suppression
-- `remove_acrobat_addin` waits for Word, Excel, PowerPoint, and Acrobat to quit in interactive modes; `silent` mode force-stops those apps before cleanup
+- `remove_acrobat_addin` waits for Word, Excel, PowerPoint, and Acrobat to quit in interactive modes; `silent` mode consults `silentSkipForceQuitOps`, which skips that operation's force-quit step by default
 - Selecting `remove_office` auto-adds `remove_skypeforbusiness`
 - Selecting `remove_office` suppresses reset-family selections
 
@@ -161,6 +160,16 @@ The script checks both supported Office content roots:
 - `~/Library/Group Containers/UBF8T346G9.Office/User Content.localized`
 
 Within each root, cleanup covers both `Startup` and `Startup.localized`, and both `Powerpoint` and `PowerPoint` folder name variants where applicable.
+
+In `silent` mode, the top-level `silentSkipForceQuitOps` array controls whether this operation force-stops Word, Excel, PowerPoint, and Acrobat before cleanup. Its default value skips force-quit:
+
+```zsh
+silentSkipForceQuitOps=(
+    remove_acrobat_addin
+)
+```
+
+Remove `remove_acrobat_addin` from that array to restore force-quit behavior for this operation. This setting affects only the Acrobat add-in preparation path; other selected operations retain their existing process-stop behavior.
 
 ## Destructive Safeguards
 
@@ -290,6 +299,7 @@ Sync local `main` from `upstream/main` without pushing your fork:
 The report uses `Covered`, `Candidate inclusion`, `Intentional divergence`, `Local-only operation`, and `Skipped` classifications, and compares:
 
 - MOFA community-maintained reset scripts against local operation coverage
+- Newly discovered MOFA community scripts that have no local operation mapping
 - Package-era Distribution choices retained in the unified workflow even when there is no current MOFA community-script mapping, when the local expanded package reference is available
 - MOFA stable feed metadata from `latest_raw_files/macos_standalone_latest.json`
 - Hard-coded local repair links, MAU application IDs, and current minimum-version thresholds for Teams and MAU
