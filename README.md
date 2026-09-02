@@ -1,6 +1,6 @@
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/dan-snelson/Microsoft-365-Reset?display_name=tag) ![GitHub issues](https://img.shields.io/github/issues-raw/dan-snelson/Microsoft-365-Reset) ![GitHub closed issues](https://img.shields.io/github/issues-closed-raw/dan-snelson/Microsoft-365-Reset) ![GitHub pull requests](https://img.shields.io/github/issues-pr-raw/dan-snelson/Microsoft-365-Reset) ![GitHub closed pull requests](https://img.shields.io/github/issues-pr-closed-raw/dan-snelson/Microsoft-365-Reset) [![swiftDialog](https://img.shields.io/badge/swiftDialog-Enabled-blue)](https://swiftdialog.app) [![Semgrep Security Scan](https://img.shields.io/badge/security%20scanned%20by-Semgrep-00C7B7?style=flat&logo=semgrep&logoColor=white)](https://semgrep.dev)
 
-# Microsoft 365 Reset (1.4.0b1)
+# Microsoft 365 Reset (1.4.0)
 
 <img src="images/Microsoft_365_Reset_Hero.png" alt="Microsoft 365 Reset" width="600" />
 
@@ -43,25 +43,24 @@ Repo-local operations without current MOFA community-script equivalents:
 
 <table>
   <tr>
-    <td><img src="images/M365R-00001.png" alt="M365R-00001"></td>
-    <td><img src="images/M365R-00002.png" alt="M365R-00002"></td>
-    <td><img src="images/M365R-00003.png" alt="M365R-00003"></td>
+    <td><img src="images/M365R-00001.png" alt="Welcome"></td>
+    <td><img src="images/M365R-00002.png" alt="Selection (all disabled)"></td>
+    <td><img src="images/M365R-00003.png" alt="Selection (one selected)"></td>
   </tr>
   <tr>
-    <td><img src="images/M365R-00004.png" alt="M365R-00004"></td>
-    <td><img src="images/M365R-00005.png" alt="M365R-00005"></td>
-    <td><img src="images/M365R-00006.png" alt="M365R-00006"></td>
+    <td><img src="images/M365R-00004.png" alt="Confirm Destructive Actions (prompt)"></td>
+    <td><img src="images/M365R-00005.png" alt="Confirm Destructive Actions (accepted)"></td>
+    <td><img src="images/M365R-00006.png" alt="Operation in progress"></td>
   </tr>
   <tr>
-    <td><img src="images/M365R-00007.png" alt="M365R-00007"></td>
-    <td><img src="images/M365R-00008.png" alt="M365R-00008"></td>
-    <td><img src="images/M365R-00009.png" alt="M365R-00009"></td>
+    <td><img src="images/M365R-00007.png" alt="Operation completed"></td>
+    <td><img src="images/M365R-00008.png" alt="Restart Recommended"></td>
+    <td><img src="images/M365R-00009.png" alt="Are you sure you want to restart your computer now?"></td>
   </tr>
 </table>
 
 ## Requirements
 
-- macOS with `zsh`
 - Root execution (`sudo` or MDM root context)
 - Active non-root console user session (script exits during preflight if none is detected)
 - Network access for swiftDialog install/upgrade in interactive modes and Microsoft package download during auto-repair operations
@@ -69,7 +68,7 @@ Repo-local operations without current MOFA community-script equivalents:
 
 Important:
 
-- Default log path is `/var/log/org.churchofjesuschrist.log` and requires root.
+- Default log path is `/var/log/org.churchofjesuschrist.log` and requires root; edit the `scriptLog` variable for your environment
 
 ## Usage
 

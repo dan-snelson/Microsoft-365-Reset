@@ -12,7 +12,7 @@
 #
 # HISTORY
 #
-# Version 1.4.0b1, 01-Sep-2026, Dan K. Snelson (@dan-snelson)
+# Version 1.4.0, 02-Sep-2026, Dan K. Snelson (@dan-snelson)
 # - Reviewed [MOFA](https://github.com/cocopuff2u/MOFA) repo
 # - Added an admin-configurable silent-mode force-quit skip list `silentSkipForceQuitOps` (Feature Request #20)
 #
@@ -30,7 +30,7 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin/
 setopt NONOMATCH
 
 # Script identity
-scriptVersion="1.4.0b1"
+scriptVersion="1.4.0"
 humanReadableScriptName="Microsoft 365 Reset"
 scriptName="M365R"
 
