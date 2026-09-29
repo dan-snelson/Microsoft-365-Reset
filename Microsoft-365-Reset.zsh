@@ -12,9 +12,16 @@
 #
 # HISTORY
 #
-# Version 1.4.0, 02-Sep-2026, Dan K. Snelson (@dan-snelson)
-# - Reviewed [MOFA](https://github.com/cocopuff2u/MOFA) repo
-# - Added an admin-configurable silent-mode force-quit skip list `silentSkipForceQuitOps` (Feature Request #20)
+# Version 2.0.0b1, 29-Sep-2026, Dan K. Snelson (@dan-snelson)
+# - Hardened root path trust based on Monocle review findings
+#   - Repair packages now stage in a root-private per-run directory instead of `/Users/Shared/OnDemandInstaller`
+#   - swiftDialog command file stays root-owned (readable, not writable, by the console user)
+#   - swiftDialog binary must be root-owned, non-writable, and signed by Team ID PWA5E9TQ59 before use
+#   - Removed `/usr/local/bin` from `PATH`
+#   - Teams background staging now uses a private `mktemp -d` directory
+# - Added `remove_defender` to the destructive-action confirmation; log when the confirmation is acknowledged
+# - Log a warning when interactive modes run without an `--operations` / `$5` allowlist
+# - Scoped `debug` mode xtrace: timestamped `PS4`; suspended in keychain, package-install, and swiftDialog-install helpers
 #
 ####################################################################################################
 
@@ -26,11 +33,11 @@
 #
 ####################################################################################################
 
-export PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin/
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 setopt NONOMATCH
 
 # Script identity
-scriptVersion="1.4.0"
+scriptVersion="2.0.0b1"
 humanReadableScriptName="Microsoft 365 Reset"
 scriptName="M365R"
 
@@ -47,7 +54,10 @@ autoload -Uz is-at-least
 
 # swiftDialog requirement and install paths
 swiftDialogMinimumRequiredVersion="3.0.1.4955"
-dialogBinary="/usr/local/bin/dialog"
+swiftDialogTeamID="PWA5E9TQ59"
+swiftDialogAppPath="/Library/Application Support/Dialog/Dialog.app"
+dialogLinkPath="/usr/local/bin/dialog"
+dialogBinary="${dialogLinkPath}"    # pinned to the validated resolved path by dialogTrustCheck
 
 # Runtime inputs (Jamf parameters by default; CLI flags can override below)
 operationMode="${4:-self-service}"
@@ -98,6 +108,8 @@ done
 case "${operationMode:l}" in
     debug)
         operationMode="debug"
+        # Timestamped trace; sensitive helpers suspend xtrace via `setopt localoptions noxtrace`
+        PS4='+%D{%H:%M:%S} %N:%i> '
         set -x
         ;;
     self\ service)
@@ -117,6 +129,8 @@ SECONDS="0"
 workDirectory="$(mktemp -d /private/tmp/${scriptName}.XXXXXX)"
 chmod 755 "${workDirectory}" 2>/dev/null
 dialogCommandFile="$(mktemp /var/tmp/dialogCommandFile_${scriptName}.XXXX)"
+# Root-owned; world-readable so swiftDialog (console-user context) can read, but not write, it
+/usr/sbin/chown root:wheel "${dialogCommandFile}" 2>/dev/null
 chmod 644 "${dialogCommandFile}" 2>/dev/null
 selectedOperations=()
 resolvedOperations=()
@@ -423,6 +437,7 @@ function findEntryGenericByCreator() {
 }
 
 function deleteGenericByLabel() {
+    setopt localoptions noxtrace
     local label="$1"
     local user="${2:-}"
     if [[ -n "${user}" ]]; then
@@ -433,6 +448,7 @@ function deleteGenericByLabel() {
 }
 
 function deleteGenericByService() {
+    setopt localoptions noxtrace
     local service="$1"
     local user="${2:-}"
     if [[ -n "${user}" ]]; then
@@ -443,6 +459,7 @@ function deleteGenericByService() {
 }
 
 function deleteInternetByService() {
+    setopt localoptions noxtrace
     local service="$1"
     local user="${2:-}"
     if [[ -n "${user}" ]]; then
@@ -453,6 +470,7 @@ function deleteInternetByService() {
 }
 
 function deleteGenericByCreator() {
+    setopt localoptions noxtrace
     local creator="$1"
     local user="${2:-}"
     if [[ -n "${user}" ]]; then
@@ -463,6 +481,7 @@ function deleteGenericByCreator() {
 }
 
 function deleteGenericByLabelLoop() {
+    setopt localoptions noxtrace
     local label="$1"
     local user="${2:-}"
     while findEntryGenericByLabel "${label}" "${user}"; do
@@ -523,18 +542,27 @@ function contentLengthForURL() {
 }
 
 function repairFromMicrosoftPkg() {
+    setopt localoptions noxtrace
     local appName="$1"
     local downloadURL="$2"
     local explicitPkgURL="$3"
 
-    local downloadFolder="/Users/Shared/OnDemandInstaller/"
+    local downloadFolder=""
     local pkgURL=""
     local pkgName=""
+    local pkgPath=""
     local expectedSize=""
     local localSize=""
+    local installRC=0
 
-    rm -rf "${downloadFolder}" >>"${scriptLog}" 2>&1
-    mkdir -p "${downloadFolder}" >>"${scriptLog}" 2>&1
+    # Root-private per-run staging (inside root-owned workDirectory; removed by cleanup trap)
+    downloadFolder="$(mktemp -d "${workDirectory}/OnDemandInstaller.XXXXXX")"
+    if [[ -z "${downloadFolder}" || ! -d "${downloadFolder}" ]]; then
+        errorOut "Unable to create private package staging directory for ${appName}"
+        return 1
+    fi
+    chmod 700 "${downloadFolder}" || return 1
+    downloadFolder="${downloadFolder}/"
 
     if [[ -n "${explicitPkgURL}" ]]; then
         pkgURL="${explicitPkgURL}"
@@ -548,31 +576,42 @@ function repairFromMicrosoftPkg() {
     fi
 
     pkgName="$(basename "${pkgURL}")"
+    pkgPath="${downloadFolder}${pkgName}"
     expectedSize="$(contentLengthForURL "${pkgURL}")"
 
     info "Starting package download for ${appName}: ${pkgURL}"
     /usr/bin/nscurl --download --large-download --location --download-directory "${downloadFolder}" "${pkgURL}" >>"${scriptLog}" 2>&1 || return 1
 
-    if [[ ! -f "${downloadFolder}${pkgName}" ]]; then
-        errorOut "Downloaded package missing for ${appName}"
+    if [[ -L "${pkgPath}" || ! -f "${pkgPath}" ]]; then
+        errorOut "Downloaded package missing or not a regular file for ${appName}"
+        return 1
+    fi
+
+    if [[ "$(stat -f '%u' "${pkgPath}" 2>/dev/null)" != "0" ]]; then
+        errorOut "Downloaded package for ${appName} is not root-owned; refusing to install"
         return 1
     fi
 
     if [[ -n "${expectedSize}" ]]; then
-        localSize="$(stat -qf%z "${downloadFolder}${pkgName}" 2>/dev/null)"
+        localSize="$(stat -qf%z "${pkgPath}" 2>/dev/null)"
         if [[ -n "${localSize}" && "${localSize}" != "${expectedSize}" ]]; then
             errorOut "Malformed package download for ${appName}; expected ${expectedSize}, got ${localSize}"
             return 1
         fi
     fi
 
-    if ! verifyMicrosoftPkgSignature "${downloadFolder}${pkgName}"; then
+    if ! verifyMicrosoftPkgSignature "${pkgPath}"; then
         errorOut "Package signature check failed for ${appName}"
         return 1
     fi
 
     info "Installing package for ${appName}"
-    /usr/sbin/installer -pkg "${downloadFolder}${pkgName}" -target / >>"${scriptLog}" 2>&1
+    /usr/sbin/installer -pkg "${pkgPath}" -target / >>"${scriptLog}" 2>&1
+    installRC=$?
+
+    safeRemove "${downloadFolder%/}"
+
+    return ${installRC}
 }
 
 function resolveCustomManifest() {
@@ -690,8 +729,8 @@ function maybeRepairOfficeApp() {
 ####################################################################################################
 
 function dialogInstall() {
+    setopt localoptions noxtrace
     local dialogURL
-    local expectedTeamID="PWA5E9TQ59"
     local tempPkgDir
 
     dialogURL="$(curl -L --silent --fail --connect-timeout 10 --max-time 30 \
@@ -710,7 +749,7 @@ function dialogInstall() {
 
     local teamID
     teamID="$(spctl -a -vv -t install "${tempPkgDir}/Dialog.pkg" 2>&1 | awk -F'[()]' '/origin=/{print $2}' | tr -d ' ')"
-    if [[ "${teamID}" != "${expectedTeamID}" ]]; then
+    if [[ "${teamID}" != "${swiftDialogTeamID}" ]]; then
         rm -rf "${tempPkgDir}"
         fatal "swiftDialog package team ID mismatch: ${teamID}"
     fi
@@ -723,23 +762,67 @@ function dialogInstall() {
     rm -rf "${tempPkgDir}"
 }
 
+function dialogTrustCheck() {
+    # Validates the swiftDialog link and its target; on success, pins dialogBinary to the resolved path
+    local resolvedPath
+    local pathToCheck
+    local ownerMode
+    local teamID
+
+    if [[ -L "${dialogLinkPath}" && "$(stat -f '%u' "${dialogLinkPath}" 2>/dev/null)" != "0" ]]; then
+        warning "swiftDialog link is not root-owned: ${dialogLinkPath}"
+        return 1
+    fi
+
+    resolvedPath="${dialogLinkPath:A}"
+    if [[ "${resolvedPath}" != "${swiftDialogAppPath}/Contents/MacOS/"* || ! -x "${resolvedPath}" ]]; then
+        warning "swiftDialog binary does not resolve inside ${swiftDialogAppPath}: ${resolvedPath}"
+        return 1
+    fi
+
+    for pathToCheck in "${resolvedPath}" "${swiftDialogAppPath}" "${swiftDialogAppPath:h}"; do
+        ownerMode="$(stat -f '%u %Lp' "${pathToCheck}" 2>/dev/null)"
+        if [[ -z "${ownerMode}" || "${ownerMode%% *}" != "0" ]] || (( 8#${ownerMode##* } & 8#022 )); then
+            warning "swiftDialog path is not root-owned or is group/other-writable: ${pathToCheck} (${ownerMode:-unknown})"
+            return 1
+        fi
+    done
+
+    teamID="$(/usr/bin/codesign -dv "${resolvedPath}" 2>&1 | awk -F'=' '/^TeamIdentifier=/{print $2}')"
+    if [[ "${teamID}" != "${swiftDialogTeamID}" ]]; then
+        warning "swiftDialog binary team ID mismatch: ${teamID:-none}"
+        return 1
+    fi
+
+    dialogBinary="${resolvedPath}"
+    return 0
+}
+
 function dialogCheck() {
-    if [[ ! -x "${dialogBinary}" ]]; then
+    if [[ ! -x "${dialogLinkPath}" ]]; then
         preFlight "swiftDialog binary not found; installing"
         dialogInstall
     fi
 
+    if ! dialogTrustCheck; then
+        preFlight "swiftDialog failed trust validation; reinstalling"
+        dialogInstall
+        dialogTrustCheck || fatal "swiftDialog failed trust validation after reinstall; refusing to run as root"
+    fi
+
     local installedVersion
-    installedVersion="$(${dialogBinary} --version 2>/dev/null | awk '{print $NF}' | tr -d '()')"
+    installedVersion="$("${dialogBinary}" --version 2>/dev/null | awk '{print $NF}' | tr -d '()')"
     if [[ -z "${installedVersion}" ]]; then
         preFlight "Unable to read swiftDialog version; reinstalling"
         dialogInstall
-        installedVersion="$(${dialogBinary} --version 2>/dev/null | awk '{print $NF}' | tr -d '()')"
+        dialogTrustCheck || fatal "swiftDialog failed trust validation after reinstall; refusing to run as root"
+        installedVersion="$("${dialogBinary}" --version 2>/dev/null | awk '{print $NF}' | tr -d '()')"
     fi
 
     if ! is-at-least "${swiftDialogMinimumRequiredVersion}" "${installedVersion}"; then
         preFlight "swiftDialog ${installedVersion} is below required ${swiftDialogMinimumRequiredVersion}; upgrading"
         dialogInstall
+        dialogTrustCheck || fatal "swiftDialog failed trust validation after reinstall; refusing to run as root"
     fi
 }
 
@@ -757,7 +840,7 @@ function formattedElapsedTime() {
 function showIntroDialog() {
     [[ "${operationMode}" == "silent" ]] && return 0
 
-    ${dialogBinary} \
+    "${dialogBinary}" \
         --title "${humanReadableScriptName}" \
         --infotext "${scriptVersion}" \
         --messagefont "size=${fontSize}" \
@@ -845,6 +928,7 @@ function showSelectionDialog() {
         allowedOperations=("${selectedOperations[@]}")
         selectedOperations=()
     else
+        warning "No --operations / \$5 allowlist supplied; showing all ${#operationIDs[@]} operations (supply an allowlist for Self Service policies)"
         allowedOperations=("${operationIDs[@]}")
     fi
 
@@ -864,7 +948,7 @@ function showSelectionDialog() {
             messageText="${messageText}\n\n:red[${warningMessage}]"
         fi
 
-        dialogOutput="$(${dialogBinary} \
+        dialogOutput="$("${dialogBinary}" \
             --title "${humanReadableScriptName}" \
             --infotext "${scriptVersion}" \
             --messagefont "size=${fontSize}" \
@@ -965,15 +1049,16 @@ function confirmDestructiveSelection() {
     isOperationSelected remove_office && requiresConfirmation="true"
     isOperationSelected remove_outlook_data && requiresConfirmation="true"
     isOperationSelected remove_onenote_data && requiresConfirmation="true"
+    isOperationSelected remove_defender && requiresConfirmation="true"
 
     [[ "${requiresConfirmation}" == "false" ]] && return 0
     [[ "${operationMode}" == "silent" ]] && return 0
 
-    ${dialogBinary} \
+    "${dialogBinary}" \
         --title "Confirm Destructive Actions" \
         --infotext "${scriptVersion}" \
         --messagefont "size=${fontSize}" \
-        --message "**:red[Warning:]** You selected one or more destructive actions that can permanently remove local data.\n\nConfirm to proceed." \
+        --message "**:red[Warning:]** You selected one or more destructive actions that can permanently remove local data or security tooling.\n\nConfirm to proceed." \
         --icon "SF=exclamationmark.triangle, weight=bold, colour1=red" \
         --checkbox "I understand these actions are destructive,name=confirm_destructive,enableButton1" \
         --json \
@@ -992,6 +1077,8 @@ function confirmDestructiveSelection() {
         exit 2
     fi
 
+    info "User '${loggedInUser}' acknowledged destructive confirmation"
+
     return 0
 }
 
@@ -1000,15 +1087,17 @@ function startProgressDialog() {
 
     local progressMessage
 
+    # Keep command file root-owned; swiftDialog only needs read access
+    if [[ -L "${dialogCommandFile}" || ! -f "${dialogCommandFile}" ]]; then
+        warning "swiftDialog command file missing or replaced by a symlink; recreating in ${workDirectory}"
+        dialogCommandFile="$(mktemp "${workDirectory}/dialogCommandFile_${scriptName}.XXXX")"
+    fi
     : > "${dialogCommandFile}"
     chmod 644 "${dialogCommandFile}" 2>/dev/null
-    if [[ -n "${loggedInUser}" ]]; then
-        /usr/sbin/chown "${loggedInUser}" "${dialogCommandFile}" 2>/dev/null
-    fi
 
     progressMessage="$(progressDialogMessage)"
 
-    ${dialogBinary} \
+    "${dialogBinary}" \
         --title "${humanReadableScriptName}" \
         --infotext "${scriptVersion}" \
         --messagefont "size=${fontSize}" \
@@ -1102,7 +1191,7 @@ function showCompletionDialog() {
         summary+="<br><br>Repaired this run; cleanup deferred until a later run: ${(j:, :)repairedTitles}"
     fi
 
-    ${dialogBinary} \
+    "${dialogBinary}" \
         --title "${humanReadableScriptName}" \
         --infotext "${scriptVersion}" \
         --messagefont "size=${fontSize}" \
@@ -1144,7 +1233,7 @@ function promptForRestart() {
     local rc
     local restartFontSize=$(( fontSize > 2 ? fontSize - 2 : fontSize ))
 
-    ${dialogBinary} \
+    "${dialogBinary}" \
         --title "Restart Recommended" \
         --infotext "${scriptVersion}" \
         --messagefont "size=${restartFontSize}" \
@@ -1976,7 +2065,8 @@ function resetTeamsOperation() {
     local teamsPkgURL="https://go.microsoft.com/fwlink/?linkid=2249065"
     local classicBackgroundsPath="${loggedInUserHome}/Library/Application Support/Microsoft/Teams/Backgrounds"
     local modernBackgroundsPath="${loggedInUserHome}/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/Backgrounds"
-    local modernBackgroundsStaging="/tmp/${scriptName}_Teams_Backgrounds"
+    local modernBackgroundsStagingRoot=""
+    local modernBackgroundsStaging=""
     local teamsBackgroundArchive="${loggedInUserHome}/Teams_Old_Backgrounds"
     local installAttempt=1
     local installationRetries=5
@@ -2033,8 +2123,16 @@ function resetTeamsOperation() {
     fi
 
     if [[ -d "${modernBackgroundsPath}" ]]; then
-        [[ -e "${modernBackgroundsStaging}" ]] && rm -rf "${modernBackgroundsStaging}" >>"${scriptLog}" 2>&1
-        /bin/mv "${modernBackgroundsPath}" "${modernBackgroundsStaging}" >>"${scriptLog}" 2>&1
+        # Root-private staging outside workDirectory so backgrounds survive a failed restore
+        modernBackgroundsStagingRoot="$(mktemp -d "/private/tmp/${scriptName}_Teams_Backgrounds.XXXXXX")"
+        if [[ -n "${modernBackgroundsStagingRoot}" && -d "${modernBackgroundsStagingRoot}" ]]; then
+            modernBackgroundsStaging="${modernBackgroundsStagingRoot}/Backgrounds"
+            if ! /bin/mv "${modernBackgroundsPath}" "${modernBackgroundsStaging}" >>"${scriptLog}" 2>&1; then
+                warning "Unable to stage Teams backgrounds; they may be removed with Teams container data"
+            fi
+        else
+            warning "Unable to create private Teams background staging directory; backgrounds may be removed with Teams container data"
+        fi
     fi
 
     safeRemove "${loggedInUserHome}/Library/Application Support/Teams"
@@ -2096,10 +2194,16 @@ function resetTeamsOperation() {
     deleteGenericByLabel 'com.microsoft.teams.HockeySDK' "${loggedInUser}"
     deleteGenericByLabel 'com.microsoft.teams.helper.HockeySDK' "${loggedInUser}"
 
-    if [[ -d "${modernBackgroundsStaging}" ]]; then
+    if [[ -n "${modernBackgroundsStaging}" && -d "${modernBackgroundsStaging}" && ! -L "${modernBackgroundsStaging}" ]]; then
         /bin/mkdir -p "$(dirname "${modernBackgroundsPath}")" >>"${scriptLog}" 2>&1
-        /bin/mv "${modernBackgroundsStaging}" "${modernBackgroundsPath}" >>"${scriptLog}" 2>&1
-        /usr/sbin/chown -R "${loggedInUser}" "$(dirname "${modernBackgroundsPath}")" >>"${scriptLog}" 2>&1
+        if /bin/mv "${modernBackgroundsStaging}" "${modernBackgroundsPath}" >>"${scriptLog}" 2>&1; then
+            /usr/sbin/chown -R "${loggedInUser}" "$(dirname "${modernBackgroundsPath}")" >>"${scriptLog}" 2>&1
+        else
+            warning "Unable to restore Teams backgrounds; retained at ${modernBackgroundsStaging}"
+        fi
+    fi
+    if [[ -n "${modernBackgroundsStagingRoot}" && -d "${modernBackgroundsStagingRoot}" ]]; then
+        /bin/rmdir "${modernBackgroundsStagingRoot}" 2>/dev/null
     fi
 
     if [[ -d "${teamsAppPath}" ]]; then
