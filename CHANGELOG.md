@@ -3,6 +3,7 @@
 ## Changelog
 
 ### Version 2.0.0b1 (29-Sep-2026)
+- Reviewed [MOFA](https://github.com/cocopuff2u/MOFA) repo
 - Hardened root path trust based on a Monocle security review
     - Microsoft repair packages now download into a root-private per-run staging directory instead of `/Users/Shared/OnDemandInstaller`, and are checked for regular-file and root ownership before `installer` runs
     - swiftDialog command file stays root-owned and world-readable; it is no longer `chown`ed to the console user
