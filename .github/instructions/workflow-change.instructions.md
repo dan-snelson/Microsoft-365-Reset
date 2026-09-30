@@ -23,6 +23,10 @@ applyTo: "Microsoft-365-Reset.zsh"
 - Keep `self-service` and `silent` aligned on operation ordering, dependency handling, and exit behavior.
 - Never let UI-only behavior leak into `silent`.
 - Avoid hidden behavior changes during refactors.
+- Keep the `self-service` allowlist gate intact: an empty `--operations` / `$5` exits `10` during preflight unless `--allow-all-operations` / `$6` is set; `test` and `debug` only log a `WARNING`.
+- Keep destructive operations (`remove_office`, `remove_outlook_data`, `remove_onenote_data`, `remove_defender`) behind the interactive destructive-action confirmation.
+- Keep exit codes predictable: `0` success or user cancellation, `2` no `silent` operations or unacknowledged destructive confirmation, `10` preflight or validation failure, `20` one or more operations failed.
+- Remove damaged or version-mismatched apps only after the replacement package downloads and passes verification.
 
 ## 3. Implementation Rules
 
@@ -53,6 +57,7 @@ applyTo: "Microsoft-365-Reset.zsh"
 - [ ] MOFA remained the primary baseline (or any divergence was explicitly documented).
 - [ ] Deterministic ordering and dependency resolution were preserved.
 - [ ] No UI-only behavior leaked into `silent`.
+- [ ] `self-service` allowlist gate, destructive confirmation, and exit codes were preserved.
 - [ ] `zsh -n Microsoft-365-Reset.zsh` ran after main-script edits.
 - [ ] `self-service` and `silent` assumptions were reviewed together.
 - [ ] Conflict resolution followed the defined priority order.

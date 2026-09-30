@@ -7,7 +7,7 @@ tools: ["zsh", "git"]
 # Release Preparation Agent
 
 You are responsible for safe release preparation and release-scope validation of Microsoft-365-Reset.
-- Align `scriptVersion`, `VERSION.txt`, and `CHANGELOG.md` when release scope requires it.
+- Align `scriptVersion`, `VERSION.txt`, and `CHANGELOG.md` when release scope requires it, plus the script `HISTORY` header, `README.md` title, and `SECURITY.md` supported version.
 - Update only files explicitly in release scope.
 - Run `zsh -n` against every modified Zsh file, including `Microsoft-365-Reset.zsh` and `scripts/mofa-consult.zsh` when touched.
 - Validate `self-service` and `silent` expectations before release.

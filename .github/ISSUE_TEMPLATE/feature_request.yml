@@ -46,11 +46,14 @@ body:
         - silent workflow
         - test or debug workflow
         - CLI arguments or Jamf parameter mapping
+        - Operation allowlist or `--allow-all-operations`
         - Operation IDs or dependency resolution
         - Microsoft app repair or reinstall
         - Microsoft 365 reset or cleanup behavior
         - Microsoft 365 removal behavior
+        - Microsoft Defender removal
         - Acrobat add-in removal
+        - swiftDialog trust or root path hardening
         - MOFA parity or maintainer report
         - Logging or exit codes
         - README or examples
@@ -87,7 +90,7 @@ body:
     attributes:
       label: Operation ID(s), if relevant
       description: List affected operation IDs.
-      placeholder: "e.g. reset_factory, reset_teams, remove_office"
+      placeholder: "e.g. reset_factory, reset_teams, remove_office, remove_defender"
 
   - type: textarea
     id: additional-context
