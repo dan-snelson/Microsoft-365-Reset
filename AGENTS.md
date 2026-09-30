@@ -142,6 +142,7 @@ Script runs as root; keep these guardrails intact in `Microsoft-365-Reset.zsh` a
 - Run console-user commands through `runAsUser` (once, in the user's session); no retry fallbacks under plain `sudo -u`.
 - Remove paths through `safeRemove` instead of bare `rm -rf`.
 - Add `setopt localoptions noxtrace` to helpers handling keychain items, package installs, or other sensitive data so `debug` traces stay safe.
+- Route keychain deletions through `runKeychainDelete`; never redirect `security` output into `"${scriptLog}"` (it echoes deleted item attributes).
 - Remove damaged or version-mismatched apps only after replacement package downloads and passes verification.
 ## Mode Expectations
 

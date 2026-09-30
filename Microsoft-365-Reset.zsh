@@ -477,48 +477,57 @@ function findEntryGenericByCreator() {
     fi
 }
 
+function runKeychainDelete() {
+    # security prints deleted item attributes (account and identity metadata) on stdout; discard all output and log a sanitized result
+    setopt localoptions noxtrace
+    local description="$1"
+    local user="$2"
+    local notFoundRC="$3"    # 44 (errSecItemNotFound) for password items; 1 for delete-certificate
+    shift 3
+    local deleteRC=0
+
+    if [[ -n "${user}" ]]; then
+        runAsUser "${user}" /usr/bin/security "$@" >/dev/null 2>&1
+    else
+        /usr/bin/security "$@" >/dev/null 2>&1
+    fi
+    deleteRC=$?
+
+    if [[ ${deleteRC} -eq 0 ]]; then
+        info "Deleted keychain item: ${description}"
+    elif [[ ${deleteRC} -ne ${notFoundRC} ]]; then
+        warning "Unable to delete keychain item: ${description} (security exit ${deleteRC})"
+    fi
+
+    return ${deleteRC}
+}
+
 function deleteGenericByLabel() {
     setopt localoptions noxtrace
     local label="$1"
     local user="${2:-}"
-    if [[ -n "${user}" ]]; then
-        runAsUser "${user}" /usr/bin/security delete-generic-password -l "${label}" >>"${scriptLog}" 2>&1
-    else
-        /usr/bin/security delete-generic-password -l "${label}" >>"${scriptLog}" 2>&1
-    fi
+    runKeychainDelete "label '${label}'" "${user}" 44 delete-generic-password -l "${label}"
 }
 
 function deleteGenericByService() {
     setopt localoptions noxtrace
     local service="$1"
     local user="${2:-}"
-    if [[ -n "${user}" ]]; then
-        runAsUser "${user}" /usr/bin/security delete-generic-password -s "${service}" >>"${scriptLog}" 2>&1
-    else
-        /usr/bin/security delete-generic-password -s "${service}" >>"${scriptLog}" 2>&1
-    fi
+    runKeychainDelete "service '${service}'" "${user}" 44 delete-generic-password -s "${service}"
 }
 
 function deleteInternetByService() {
     setopt localoptions noxtrace
     local service="$1"
     local user="${2:-}"
-    if [[ -n "${user}" ]]; then
-        runAsUser "${user}" /usr/bin/security delete-internet-password -s "${service}" >>"${scriptLog}" 2>&1
-    else
-        /usr/bin/security delete-internet-password -s "${service}" >>"${scriptLog}" 2>&1
-    fi
+    runKeychainDelete "internet password service '${service}'" "${user}" 44 delete-internet-password -s "${service}"
 }
 
 function deleteGenericByCreator() {
     setopt localoptions noxtrace
     local creator="$1"
     local user="${2:-}"
-    if [[ -n "${user}" ]]; then
-        runAsUser "${user}" /usr/bin/security delete-generic-password -G "${creator}" >>"${scriptLog}" 2>&1
-    else
-        /usr/bin/security delete-generic-password -G "${creator}" >>"${scriptLog}" 2>&1
-    fi
+    runKeychainDelete "creator '${creator}'" "${user}" 44 delete-generic-password -G "${creator}"
 }
 
 function deleteGenericByLabelLoop() {
@@ -531,6 +540,7 @@ function deleteGenericByLabelLoop() {
 }
 
 function deleteGenericByCreatorLoop() {
+    setopt localoptions noxtrace
     local creator="$1"
     local user="${2:-}"
     while findEntryGenericByCreator "${creator}" "${user}"; do
@@ -1808,7 +1818,7 @@ function op_reset_excel() {
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/TemporaryItems"
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/MicrosoftRegistrationDB.reg"
 
-    /usr/bin/security delete-certificate -c 'Microsoft.Office.Excel.ProtectedDataServices' >>"${scriptLog}" 2>&1
+    runKeychainDelete "certificate 'Microsoft.Office.Excel.ProtectedDataServices'" "${loggedInUser}" 1 delete-certificate -c 'Microsoft.Office.Excel.ProtectedDataServices'
 
     safeRemove "${TMPDIR}/com.microsoft.Excel"
     return 0

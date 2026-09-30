@@ -47,6 +47,7 @@ We will work with you to understand, reproduce, and fix the issue, then coordina
     - swiftDialog must be root-owned, not group/other-writable, and signed by Team ID `PWA5E9TQ59`
     - Downloads and temporary files are staged in root-private `mktemp -d` directories and checked for regular-file type and root ownership before `installer` runs
     - The swiftDialog command file stays root-owned
+    - Keychain deletions discard `security` output and log only the item label, service, or creator, so deleted account and identity attributes never reach the client log
     - Removals under the console user's home folder are refused when a parent directory resolves through a symlink
 - Run only from trusted sources (official GitHub releases or your own signed packages).
 - Consider wrapping the script in a Jamf Pro policy with scoped Smart Groups and clear end-user communication.
