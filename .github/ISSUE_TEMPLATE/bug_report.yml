@@ -16,8 +16,10 @@ body:
         ```zsh
         timestamp=$( date '+%Y-%m-%d-%H%M%S' )
         curl -L -o ~/Downloads/Microsoft-365-Reset-$timestamp.zsh https://raw.githubusercontent.com/dan-snelson/Microsoft-365-Reset/main/Microsoft-365-Reset.zsh
-        sudo /bin/zsh --no-rcs ~/Downloads/Microsoft-365-Reset-$timestamp.zsh --mode debug --operations <operation IDs>
+        sudo /bin/zsh --no-rcs ~/Downloads/Microsoft-365-Reset-$timestamp.zsh --mode debug --operations reset_word,reset_excel
         ```
+
+        Replace `reset_word,reset_excel` with the comma-separated operation IDs you used originally.
 
         `debug` mode is **not** a dry run; selected operations really run.
 

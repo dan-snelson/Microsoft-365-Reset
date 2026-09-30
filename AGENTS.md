@@ -51,7 +51,7 @@ Invoke relevant skill name during planning.
 ### Release Preparation Skill
 
 1. Keep `scriptVersion`, `VERSION.txt`, and the top `CHANGELOG.md` entry aligned, plus the script `HISTORY` header, `README.md` title, and `SECURITY.md` supported version.
-2. When promoting a beta (for example `2.0.0`) to final (`2.0.0`), fold beta `CHANGELOG.md` entries into the final entry; call out breaking changes with the `:warning: **Breaking Change:** :warning:` pattern.
+2. When promoting a beta (for example `2.0.0b2`) to final (`2.0.0`), fold beta `CHANGELOG.md` entries into the final entry; call out breaking changes with the `:warning: **Breaking Change:** :warning:` pattern.
 3. Update only files explicitly in release scope.
 4. Run syntax checks on every modified Zsh file.
 5. Validate both `self-service` and `silent` expectations before release.

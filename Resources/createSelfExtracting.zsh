@@ -9,7 +9,8 @@
 # Date: 29-Sep-2026
 # - Extract into a root-private `mktemp -d` directory (not a fixed `/var/tmp` path)
 # - Forward wrapper arguments (Jamf `$1`-`$6`, CLI flags) to the extracted script
-# - Restrict `--target` to inert filename characters
+# - Restrict `--target` to inert filename characters (rejecting `.` and `..`)
+# - Pin wrapper `PATH`, use absolute tool paths, and run the extracted script with `/bin/zsh --no-rcs`
 
 # Script for creating self extracting base64 encoded files.
 
@@ -26,7 +27,7 @@ file_to_self_extracting_script() {
     base64_string=$(base64 -i "$1")
     filename=$(basename "$1")
     local target_name="$(basename "${2:-${TARGET_NAME}}")"
-    if [[ ! "${target_name}" =~ '^[A-Za-z0-9._-]+$' ]]; then
+    if [[ ! "${target_name}" =~ '^[A-Za-z0-9._-]+$' || "${target_name}" == "." || "${target_name}" == ".." ]]; then
         echo "Error: Invalid target name '${target_name}'; use letters, digits, '.', '_', or '-' only."
         exit 1
     fi
@@ -34,15 +35,17 @@ file_to_self_extracting_script() {
 
     cat <<EOF > "${output_script}"
 #!/bin/sh
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
 base64_string='$base64_string'
-target_dir="\$(mktemp -d /private/var/tmp/M365R-extract.XXXXXX)" || exit 1
-chmod 700 "\${target_dir}" || exit 1
-trap 'rm -rf "\${target_dir}"' EXIT
+target_dir="\$(/usr/bin/mktemp -d /private/var/tmp/M365R-extract.XXXXXX)" || exit 1
+/bin/chmod 700 "\${target_dir}" || exit 1
+trap '/bin/rm -rf "\${target_dir}"' EXIT
 target_path="\${target_dir}/${target_name}"
-printf '%s' "\$base64_string" | base64 -d > "\${target_path}" || exit 1
-chmod 700 "\${target_path}"
+printf '%s' "\$base64_string" | /usr/bin/base64 -d > "\${target_path}" || exit 1
+/bin/chmod 700 "\${target_path}"
 echo "File '\${target_path}' has been created."
-zsh "\${target_path}" "\$@"
+/bin/zsh --no-rcs "\${target_path}" "\$@"
 exit \$?
 EOF
     echo "Self-extracting script '${output_script}' created."

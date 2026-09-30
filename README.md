@@ -16,7 +16,7 @@ Unified `zsh` script to repair, reset, or remove Microsoft 365 components on mac
 > - **Permanently delete local data:** Outlook mailbox data, OneNote content that has not synced to the cloud, Office templates and preferences, and sign-in items in the user's keychain
 > - **Remove security tooling:** `remove_defender` uninstalls Microsoft Defender
 > - **Remove every Microsoft 365 app:** `remove_office` also deletes local Outlook profile data, managed preferences, and the shared `/Library/Logs/Microsoft` folder, which other Microsoft products (for example, Defender and Intune) also write to
-> - **Force-quit Microsoft apps:** unsaved work in Word, Excel, PowerPoint, Outlook, OneNote, OneDrive, and Teams is lost; interactive modes tell the user to save first, `silent` runs **give no warning**
+> - **Force-quit Microsoft apps:** unsaved work in Word, Excel, PowerPoint, Outlook, OneNote, OneDrive, and Teams is lost; interactive modes tell the user to save first; `silent` runs **give no warning**
 >
 > **There is no undo.** Apps can be reinstalled and caches rebuild themselves, but deleted mail, unsynced notes, keychain items, and removed security tooling need separate recovery.
 >
@@ -42,7 +42,7 @@ The script consolidates expanded package workflows into one root-run tool with:
 
 - Separate `reset_license` and `reset_credentials` operations align with MOFA's separate license-only and broader sign-in reset flows
 - App repair/reinstall flows for Word, Excel, PowerPoint, Outlook, and OneNote stop after repair without continuing into configuration cleanup, matching current MOFA behavior
-- Teams background preservation (restored in the console user's context), TCC reset, and retention of a valid current Teams app bundle align with current MOFA behavior
+- Teams background preservation (destination folders created in the console user's context), TCC reset, and retention of a valid current Teams app bundle align with current MOFA behavior
 - `remove_office` removes only the Office-owned children of `/Library/Application Support/Microsoft` (`MAU2.0`, `MERP2.0`, `Office365`) and no longer forgets the Defender (`com.microsoft.wdav`) package receipt, matching current MOFA Office Removal; like MOFA, it still removes `/Library/Logs/Microsoft` and `~/Library/Application Support/Microsoft`
 
 Intentional divergences from current MOFA behavior:
