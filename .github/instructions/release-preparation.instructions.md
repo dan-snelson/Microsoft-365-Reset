@@ -20,7 +20,7 @@ applyTo: "**/*.{zsh,md,txt}"
 
 - Keep `scriptVersion` in `Microsoft-365-Reset.zsh`, `VERSION.txt`, and the top entry in `CHANGELOG.md` aligned when preparing a release.
 - Also align the secondary markers: the `HISTORY` header in `Microsoft-365-Reset.zsh`, the `README.md` title, and the supported-version line in `SECURITY.md`.
-- When promoting a beta (for example `2.0.0b2`) to a final release (for example `2.0.0`), fold the beta `CHANGELOG.md` entries into the final entry instead of leaving stale beta headings on top.
+- When promoting a beta (for example `2.0.0`) to a final release (for example `2.0.0`), fold the beta `CHANGELOG.md` entries into the final entry instead of leaving stale beta headings on top.
 - Call out breaking changes with the existing `:warning: **Breaking Change:** :warning:` pattern.
 - If version markers drift, stop release preparation immediately and correct the mismatch before continuing.
 - Update `CHANGELOG.md` only for shipped behavior. Do not document speculative or deferred work.

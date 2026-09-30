@@ -12,7 +12,7 @@
 #
 # HISTORY
 #
-# Version 2.0.0b2, 30-Sep-2026, Dan K. Snelson (@dan-snelson)
+# Version 2.0.0, 30-Sep-2026, Dan K. Snelson (@dan-snelson)
 # - See CHANGELOG.md for details
 #
 ####################################################################################################
@@ -29,7 +29,7 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 setopt NONOMATCH
 
 # Script identity
-scriptVersion="2.0.0b2"
+scriptVersion="2.0.0"
 humanReadableScriptName="Microsoft 365 Reset"
 scriptName="M365R"
 

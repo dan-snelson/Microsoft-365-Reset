@@ -2,7 +2,7 @@
 
 ## Changelog
 
-### Version 2.0.0b2 (30-Sep-2026)
+### Version 2.0.0 (30-Sep-2026)
 - Addressed critical findings from a second Monocle security review
     - :warning: **Breaking Change:** :warning: `self-service` mode now exits `10` during preflight when no `--operations` / `$5` allowlist is supplied; pass `--allow-all-operations` or set Parameter `$6` to `true` for deliberately broad, admin-only policies (`test` and `debug` keep the logged `WARNING`)
     - `remove_office` no longer deletes `/Library/Application Support/Microsoft` or forgets the Defender (`com.microsoft.wdav`) package receipt, matching current MOFA Office Removal; Office-owned `MAU2.0`, `MERP2.0`, and `Office365` are still removed, and Defender and Edge data are preserved
