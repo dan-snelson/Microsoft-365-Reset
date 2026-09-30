@@ -8,8 +8,8 @@ This tool runs with **`root` privileges** and can perform destructive operations
 
 Only the **latest release** is actively supported for security updates.
 
-- Current stable/beta: [v1.2.0](https://github.com/dan-snelson/Microsoft-365-Reset/releases) (and newer)
-- Older releases receive no security patches.
+- Current stable: [v2.0.0](https://github.com/dan-snelson/Microsoft-365-Reset/releases) (and newer)
+- Older releases, including `1.x` and the `2.0.0` betas, receive no security patches.
 
 We strongly recommend always using the latest version, especially in Jamf Pro Self Service or MDM deployments.
 
@@ -36,16 +36,24 @@ We will work with you to understand, reproduce, and fix the issue, then coordina
 
 ## Security Best Practices When Using This Tool
 
-- Always test in a lab/VM before broad deployment (especially `remove_office`, `remove_outlook_data`, and `remove_onenote_data` operations).
+- Always test in a lab/VM before broad deployment (especially `remove_office`, `remove_outlook_data`, `remove_onenote_data`, and `remove_defender` operations).
 - In interactive modes, the script requires explicit confirmation for destructive actions.
-- In silent/Jamf mode, double-check your `--operations` or parameter `$5` list — there is no UI confirmation.
-- The script performs **signature verification** (`codesign`) and content-length checks on Microsoft packages during auto-repair.
+- In `self-service` mode, always supply an `--operations` / Parameter `$5` allowlist; an empty allowlist exits `10` during preflight unless `--allow-all-operations` / Parameter `$6` is `true` (reserve that for deliberately broad, admin-only policies).
+- In `silent` mode, double-check your `--operations` or Parameter `$5` list — there is no UI confirmation.
+- `test` mode is **not** a dry run; it performs real operations.
+- Microsoft packages are verified with `pkgutil --check-signature` and content-length checks during auto-repair, and a damaged or version-mismatched app is removed only after its replacement passes verification.
+- Root path trust guardrails:
+    - `PATH` is pinned to `/usr/bin:/bin:/usr/sbin:/sbin`
+    - swiftDialog must be root-owned, not group/other-writable, and signed by Team ID `PWA5E9TQ59`
+    - Downloads and temporary files are staged in root-private `mktemp -d` directories and checked for regular-file type and root ownership before `installer` runs
+    - The swiftDialog command file stays root-owned
 - Run only from trusted sources (official GitHub releases or your own signed packages).
 - Consider wrapping the script in a Jamf Pro policy with scoped Smart Groups and clear end-user communication.
 
 ## Code Security Practices
 
 - This repository is scanned with **Semgrep** using the `p/r2c-security-audit`, `p/ci`, and `p/secrets` rulesets.
+- Commits are scanned for secrets with **Gitleaks**.
 - Tracked `*.zsh` files are syntax-checked with `zsh -n`.
 - Tracked `*.sh` and `*.bash` files are linted with **ShellCheck** when present in the repository.
 - We avoid dangerous patterns common in shell scripts (e.g., unsafe `eval`, unquoted variables where possible, etc.).
@@ -70,4 +78,4 @@ Grateful for the Mac Admins community that keeps us all safer.
 
 — Dan K. Snelson  
 
-Last updated: 20-May-2026
+Last updated: 30-Sep-2026
