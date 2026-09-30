@@ -16,10 +16,16 @@ body:
         ```zsh
         timestamp=$( date '+%Y-%m-%d-%H%M%S' )
         curl -L -o ~/Downloads/Microsoft-365-Reset-$timestamp.zsh https://raw.githubusercontent.com/dan-snelson/Microsoft-365-Reset/main/Microsoft-365-Reset.zsh
-        sudo zsh ~/Downloads/Microsoft-365-Reset-$timestamp.zsh --mode debug
+        sudo /bin/zsh --no-rcs ~/Downloads/Microsoft-365-Reset-$timestamp.zsh --mode debug --operations reset_word,reset_excel
         ```
 
+        Replace `reset_word,reset_excel` with the comma-separated operation IDs you used originally.
+
+        `debug` mode is **not** a dry run; selected operations really run.
+
         If the problem is automation-only, rerun the same `--mode silent --operations ...` invocation you used originally.
+
+        Starting with `2.0.0`, `self-service` exits `10` during preflight when no `--operations` / `$5` allowlist is supplied, unless `--allow-all-operations` / `$6` is set; confirm your policy scoping before filing that exit as a bug.
 
   - type: checkboxes
     id: preflight
@@ -47,7 +53,7 @@ body:
     attributes:
       label: Microsoft 365 Reset version tested
       description: Which release, version, or commit did you run?
-      placeholder: "e.g. 1.3.0 or main @ abc1234"
+      placeholder: "e.g. 2.0.0 or main @ abc1234"
     validations:
       required: true
 
@@ -88,21 +94,52 @@ body:
       required: true
 
   - type: dropdown
+    id: allow-all-operations
+    attributes:
+      label: Allow-all opt-in
+      description: Was `--allow-all-operations` or Jamf Parameter `$6` set?
+      options:
+        - Not set
+        - "`--allow-all-operations`"
+        - "Jamf Parameter `$6` (`true` / `yes` / `1`)"
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: exit-code
+    attributes:
+      label: Exit code
+      description: Exit code returned by Microsoft 365 Reset, if known
+      options:
+        - "`0` (success or user cancellation)"
+        - "`2` (no silent operations or destructive confirmation not acknowledged)"
+        - "`10` (preflight or validation failure)"
+        - "`20` (one or more operations failed)"
+        - Other
+        - Not sure
+
+  - type: dropdown
     id: affected-area
     attributes:
       label: Which area looks broken?
       options:
         - Pre-flight or dependency checks
+        - swiftDialog install, trust check, or version validation
         - swiftDialog UI or picker flow
+        - Operation allowlist (`--operations` / `$5`, `--allow-all-operations` / `$6`)
         - Silent mode parsing or `--operations`
         - Dependency resolution or operation ordering
         - Destructive confirmation flow
         - Microsoft app repair or reinstall
+        - Microsoft package download or verification
         - Microsoft 365 reset or cleanup behavior
         - Microsoft 365 removal behavior
+        - Microsoft Defender removal
         - Acrobat add-in removal
         - MOFA parity or maintainer report
         - Logging or exit codes
+        - Self-extracting wrapper generation
         - Documentation or examples
         - Other / not sure
     validations:
@@ -159,7 +196,8 @@ body:
         Helpful artifacts:
         - Sanitized `/var/log/org.churchofjesuschrist.log`
         - Relevant `/var/log/install.log` excerpts if repair or reinstall was involved
-        - Full Terminal command, Jamf parameters, or policy trigger
+        - Full Terminal command, Jamf parameters (`$4`-`$6`), or policy trigger
+        - Exit code and any `FATAL ERROR` or `WARNING` log lines
         - `zsh -x` output, if captured
         - Screenshots of selection, destructive confirmation, progress, or completion dialogs
         - Notes about affected Microsoft apps

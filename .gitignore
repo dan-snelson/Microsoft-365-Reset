@@ -1,5 +1,5 @@
 # Microsoft 365 Reset
-## Version 1.2.0
+## Version 2.0.0
 
 ### macOS
 .DS_Store
@@ -32,3 +32,6 @@ VERSION.txt
 ### Local installer artifact to keep out of source control
 /Resources/Microsoft_Office_Reset_2.0.0b1.pkg
 /Resources/Microsoft_Office_Reset_2.0.0b1_expanded/
+
+### Generated self-extracting wrappers (build artifacts; see Resources/createSelfExtracting.zsh)
+/Resources/*_self-extracting-*.sh

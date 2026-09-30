@@ -6,15 +6,14 @@
 #
 # Unified swiftDialog-driven replacement for expanded Office-Reset package workflows.
 #
-# https://snelson.us
+# https://snelson.us/m365r
 #
 ####################################################################################################
 #
 # HISTORY
 #
-# Version 1.4.0, 02-Sep-2026, Dan K. Snelson (@dan-snelson)
-# - Reviewed [MOFA](https://github.com/cocopuff2u/MOFA) repo
-# - Added an admin-configurable silent-mode force-quit skip list `silentSkipForceQuitOps` (Feature Request #20)
+# Version 2.0.0, 30-Sep-2026, Dan K. Snelson (@dan-snelson)
+# - See CHANGELOG.md for details
 #
 ####################################################################################################
 
@@ -26,11 +25,11 @@
 #
 ####################################################################################################
 
-export PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin/
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 setopt NONOMATCH
 
 # Script identity
-scriptVersion="1.4.0"
+scriptVersion="2.0.0"
 humanReadableScriptName="Microsoft 365 Reset"
 scriptName="M365R"
 
@@ -47,11 +46,15 @@ autoload -Uz is-at-least
 
 # swiftDialog requirement and install paths
 swiftDialogMinimumRequiredVersion="3.0.1.4955"
-dialogBinary="/usr/local/bin/dialog"
+swiftDialogTeamID="PWA5E9TQ59"
+swiftDialogAppPath="/Library/Application Support/Dialog/Dialog.app"
+dialogLinkPath="/usr/local/bin/dialog"
+dialogBinary="${dialogLinkPath}"    # pinned to the validated resolved path by dialogTrustCheck
 
 # Runtime inputs (Jamf parameters by default; CLI flags can override below)
 operationMode="${4:-self-service}"
 operationCSV="${5:-}"
+allowAllOperations="${6:-false}"    # self-service requires an allowlist unless explicitly opted in
 
 # Client-side Log
 scriptLog="/var/log/org.churchofjesuschrist.log"
@@ -65,7 +68,7 @@ while [[ $# -gt 0 ]]; do
         --mode)
             seenCLIFlag="true"
             if [[ -z "${2:-}" || "${2}" == -* ]]; then
-                echo "Missing or invalid value for --mode. Usage: $0 [--mode MODE] [--operations CSV]"
+                echo "Missing or invalid value for --mode. Usage: $0 [--mode MODE] [--operations CSV] [--allow-all-operations]"
                 exit 10
             fi
             operationMode="$2"
@@ -74,11 +77,16 @@ while [[ $# -gt 0 ]]; do
         --operations)
             seenCLIFlag="true"
             if [[ -z "${2:-}" || "${2}" == -* ]]; then
-                echo "Missing or invalid value for --operations. Usage: $0 [--mode MODE] [--operations CSV]"
+                echo "Missing or invalid value for --operations. Usage: $0 [--mode MODE] [--operations CSV] [--allow-all-operations]"
                 exit 10
             fi
             operationCSV="$2"
             shift 2
+            ;;
+        --allow-all-operations)
+            seenCLIFlag="true"
+            allowAllOperations="true"
+            shift
             ;;
         --*)
             echo "Unknown argument: $1"
@@ -98,6 +106,8 @@ done
 case "${operationMode:l}" in
     debug)
         operationMode="debug"
+        # Timestamped trace; sensitive helpers suspend xtrace via `setopt localoptions noxtrace`
+        PS4='+%D{%H:%M:%S} %N:%i> '
         set -x
         ;;
     self\ service)
@@ -112,11 +122,22 @@ case "${operationMode:l}" in
         ;;
 esac
 
+case "${allowAllOperations:l}" in
+    true|yes|1)
+        allowAllOperations="true"
+        ;;
+    *)
+        allowAllOperations="false"
+        ;;
+esac
+
 # Runtime work files and operation result tracking
 SECONDS="0"
 workDirectory="$(mktemp -d /private/tmp/${scriptName}.XXXXXX)"
 chmod 755 "${workDirectory}" 2>/dev/null
 dialogCommandFile="$(mktemp /var/tmp/dialogCommandFile_${scriptName}.XXXX)"
+# Root-owned; world-readable so swiftDialog (console-user context) can read, but not write, it
+/usr/sbin/chown root:wheel "${dialogCommandFile}" 2>/dev/null
 chmod 644 "${dialogCommandFile}" 2>/dev/null
 selectedOperations=()
 resolvedOperations=()
@@ -194,7 +215,7 @@ operationDescription[reset_teams_force]="Closes Microsoft Teams, removes any ins
 operationDescription[reset_autoupdate]="Resets Microsoft AutoUpdate to default settings and installs the latest version of the tool."
 operationDescription[reset_license]="Closes all apps and removes Office licensing files plus core Office identity data without the broader Teams and OneDrive sign-in cleanup."
 operationDescription[reset_credentials]="Closes all apps and removes the Office license files. Sign-in credentials and cached tokens are removed from keychain."
-operationDescription[remove_office]="Removes all Microsoft 365 and Office apps, components, add-ins, templates and configuration data."
+operationDescription[remove_office]="Removes all Microsoft 365 and Office apps, components, add-ins, templates, configuration data, Microsoft logs and sign-in data. Warning: This cannot be undone. Microsoft Defender is not removed."
 operationDescription[remove_skypeforbusiness]="Closes Microsoft Skype for Business and then removes the application, configuration data, and keychain items."
 operationDescription[remove_defender]="Closes Microsoft Defender and then removes the application, configuration data, and keychain items."
 operationDescription[remove_acrobat_addin]="Removes the Adobe Acrobat add-in files for Word, Excel, and PowerPoint."
@@ -253,6 +274,13 @@ function errorOut()  { updateScriptLog "ERROR" "${1}"; }
 function fatal()     { updateScriptLog "FATAL ERROR" "${1}"; exit 10; }
 
 function cleanup() {
+    local exitCode=$?
+
+    # Final summary in every mode (silent has no completion dialog)
+    local summary="Exiting: ${#completedOperations[@]} succeeded, ${#failedOperations[@]} failed"
+    [[ ${#failedOperations[@]} -gt 0 ]] && summary+=" (${failedOperations[*]})"
+    notice "${summary}; Elapsed Time: $(formattedElapsedTime); exit code ${exitCode}"
+
     rm -f "${dialogCommandFile}" 2>/dev/null
     rm -rf "${workDirectory}" 2>/dev/null
 }
@@ -269,7 +297,7 @@ trap cleanup EXIT
 function getLoggedInUser() {
     local consoleUser
     consoleUser="$(/bin/echo 'show State:/Users/ConsoleUser' | /usr/sbin/scutil | /usr/bin/awk '/Name :/&&!/loginwindow/{print $3}')"
-    if [[ -n "${consoleUser}" && "${consoleUser}" != "root" ]]; then
+    if [[ -n "${consoleUser}" && "${consoleUser}" != "root" && "${consoleUser}" != "_mbsetupuser" ]]; then
         echo "${consoleUser}"
     else
         echo ""
@@ -284,7 +312,7 @@ function setHomeFolder() {
         if [[ -d "/Users/${targetUser}" ]]; then
             homePath="/Users/${targetUser}"
         else
-            homePath="$(eval echo ~"${targetUser}")"
+            homePath="$(/usr/bin/dscacheutil -q user -a name "${targetUser}" 2>/dev/null | awk -F': ' '/^dir:/{print $2; exit}')"
         fi
     fi
     echo "${homePath}"
@@ -294,7 +322,6 @@ function runAsUser() {
     local user="$1"
     shift
     local userID=""
-    local rc=0
 
     if [[ -z "${user}" ]]; then
         "$@"
@@ -303,12 +330,41 @@ function runAsUser() {
 
     userID="$(id -u "${user}" 2>/dev/null)"
     if [[ "${userID}" =~ ^[0-9]+$ ]]; then
+        # Run once in the user's GUI session; do not re-run on a non-zero exit
         /bin/launchctl asuser "${userID}" /usr/bin/sudo -u "${user}" "$@"
-        rc=$?
-        [[ ${rc} -eq 0 ]] && return 0
+        return $?
     fi
 
     /usr/bin/sudo -u "${user}" "$@"
+}
+
+function pathHasTrustedParents() {
+    # Under the console user's home, parent directories must not resolve through a user-planted symlink (root follows them)
+    local targetPath="$1"
+    local homePath="${loggedInUserHome:-}"
+    local parentPath="${targetPath:h}"
+    local canonicalHome
+    local canonicalParent
+    local expectedPath
+
+    if [[ -z "${homePath}" || "${homePath}" == "/" || "${targetPath}" != "${homePath}/"* ]]; then
+        return 0
+    fi
+
+    canonicalHome="${homePath:A}"
+    canonicalParent="${parentPath:A}"
+
+    # Canonical parent must stay under the canonical home (case-sensitive prefix)
+    [[ "${canonicalParent}" == "${canonicalHome}" || "${canonicalParent}" == "${canonicalHome}/"* ]] || return 1
+
+    # Below home, case-insensitive: realpath returns on-disk case (for example, "Powerpoint" resolves to "PowerPoint")
+    expectedPath="${canonicalHome}${parentPath#"${homePath}"}"
+    [[ "${(L)canonicalParent}" == "${(L)expectedPath}" ]]
+}
+
+function pathIsUnderUserHome() {
+    local targetPath="$1"
+    [[ -n "${loggedInUser}" && -n "${loggedInUserHome}" && "${loggedInUserHome}" != "/" && "${targetPath}" == "${loggedInUserHome}/"* ]]
 }
 
 function safeRemove() {
@@ -320,8 +376,18 @@ function safeRemove() {
     fi
 
     if [[ -e "${targetPath}" || -L "${targetPath}" ]]; then
-        /bin/rm -rf "${targetPath}" >>"${scriptLog}" 2>&1
-        local rmStatus=$?
+        if ! pathHasTrustedParents "${targetPath}"; then
+            warning "safeRemove refused path with a symlinked parent directory: '${targetPath}'"
+            return 1
+        fi
+        local rmStatus
+        if pathIsUnderUserHome "${targetPath}"; then
+            # Remove as the console user so a symlink swapped in after the check cannot redirect a root deletion; no root fallback
+            runAsUser "${loggedInUser}" /bin/rm -rf "${targetPath}" >>"${scriptLog}" 2>&1
+        else
+            /bin/rm -rf "${targetPath}" >>"${scriptLog}" 2>&1
+        fi
+        rmStatus=$?
         if [[ ${rmStatus} -ne 0 ]]; then
             warning "Failed to remove path: ${targetPath}"
             return ${rmStatus}
@@ -329,6 +395,21 @@ function safeRemove() {
     fi
 
     return 0
+}
+
+function safeRemoveMatches() {
+    # Remove each expanded glob match through safeRemove; callers pass (N) globs so no match is a no-op
+    local matchPath
+    for matchPath in "$@"; do
+        safeRemove "${matchPath}"
+    done
+    return 0
+}
+
+function operationCSVIsEmpty() {
+    local normalizedOperationCSV="${operationCSV//[[:space:]]/}"
+    normalizedOperationCSV="${normalizedOperationCSV//,/}"
+    [[ -z "${normalizedOperationCSV}" ]]
 }
 
 function hasOperation() {
@@ -422,47 +503,61 @@ function findEntryGenericByCreator() {
     fi
 }
 
+function runKeychainDelete() {
+    # security prints deleted item attributes (account and identity metadata) on stdout; discard all output and log a sanitized result
+    setopt localoptions noxtrace
+    local description="$1"
+    local user="$2"
+    local notFoundRC="$3"    # 44 (errSecItemNotFound) for password items; 1 for delete-certificate
+    shift 3
+    local deleteRC=0
+
+    if [[ -n "${user}" ]]; then
+        runAsUser "${user}" /usr/bin/security "$@" >/dev/null 2>&1
+    else
+        /usr/bin/security "$@" >/dev/null 2>&1
+    fi
+    deleteRC=$?
+
+    if [[ ${deleteRC} -eq 0 ]]; then
+        info "Deleted keychain item: ${description}"
+    elif [[ ${deleteRC} -ne ${notFoundRC} ]]; then
+        warning "Unable to delete keychain item: ${description} (security exit ${deleteRC})"
+    fi
+
+    return ${deleteRC}
+}
+
 function deleteGenericByLabel() {
+    setopt localoptions noxtrace
     local label="$1"
     local user="${2:-}"
-    if [[ -n "${user}" ]]; then
-        runAsUser "${user}" /usr/bin/security delete-generic-password -l "${label}" >>"${scriptLog}" 2>&1
-    else
-        /usr/bin/security delete-generic-password -l "${label}" >>"${scriptLog}" 2>&1
-    fi
+    runKeychainDelete "label '${label}'" "${user}" 44 delete-generic-password -l "${label}"
 }
 
 function deleteGenericByService() {
+    setopt localoptions noxtrace
     local service="$1"
     local user="${2:-}"
-    if [[ -n "${user}" ]]; then
-        runAsUser "${user}" /usr/bin/security delete-generic-password -s "${service}" >>"${scriptLog}" 2>&1
-    else
-        /usr/bin/security delete-generic-password -s "${service}" >>"${scriptLog}" 2>&1
-    fi
+    runKeychainDelete "service '${service}'" "${user}" 44 delete-generic-password -s "${service}"
 }
 
 function deleteInternetByService() {
+    setopt localoptions noxtrace
     local service="$1"
     local user="${2:-}"
-    if [[ -n "${user}" ]]; then
-        runAsUser "${user}" /usr/bin/security delete-internet-password -s "${service}" >>"${scriptLog}" 2>&1
-    else
-        /usr/bin/security delete-internet-password -s "${service}" >>"${scriptLog}" 2>&1
-    fi
+    runKeychainDelete "internet password service '${service}'" "${user}" 44 delete-internet-password -s "${service}"
 }
 
 function deleteGenericByCreator() {
+    setopt localoptions noxtrace
     local creator="$1"
     local user="${2:-}"
-    if [[ -n "${user}" ]]; then
-        runAsUser "${user}" /usr/bin/security delete-generic-password -G "${creator}" >>"${scriptLog}" 2>&1
-    else
-        /usr/bin/security delete-generic-password -G "${creator}" >>"${scriptLog}" 2>&1
-    fi
+    runKeychainDelete "creator '${creator}'" "${user}" 44 delete-generic-password -G "${creator}"
 }
 
 function deleteGenericByLabelLoop() {
+    setopt localoptions noxtrace
     local label="$1"
     local user="${2:-}"
     while findEntryGenericByLabel "${label}" "${user}"; do
@@ -471,6 +566,7 @@ function deleteGenericByLabelLoop() {
 }
 
 function deleteGenericByCreatorLoop() {
+    setopt localoptions noxtrace
     local creator="$1"
     local user="${2:-}"
     while findEntryGenericByCreator "${creator}" "${user}"; do
@@ -523,56 +619,85 @@ function contentLengthForURL() {
 }
 
 function repairFromMicrosoftPkg() {
+    setopt localoptions noxtrace
     local appName="$1"
     local downloadURL="$2"
     local explicitPkgURL="$3"
+    local removeBeforeInstall="${4:-}"    # removed only after the package downloads and verifies
 
-    local downloadFolder="/Users/Shared/OnDemandInstaller/"
+    local downloadFolder=""
     local pkgURL=""
     local pkgName=""
+    local pkgPath=""
     local expectedSize=""
     local localSize=""
+    local installRC=0
 
-    rm -rf "${downloadFolder}" >>"${scriptLog}" 2>&1
-    mkdir -p "${downloadFolder}" >>"${scriptLog}" 2>&1
-
-    if [[ -n "${explicitPkgURL}" ]]; then
-        pkgURL="${explicitPkgURL}"
-    else
-        pkgURL="$(downloadResolvedPkgURL "${downloadURL}")"
-    fi
-
-    if [[ -z "${pkgURL}" ]]; then
-        errorOut "Unable to resolve download URL for ${appName}"
+    # Root-private per-run staging (inside root-owned workDirectory; removed by cleanup trap)
+    downloadFolder="$(mktemp -d "${workDirectory}/OnDemandInstaller.XXXXXX")"
+    if [[ -z "${downloadFolder}" || ! -d "${downloadFolder}" ]]; then
+        errorOut "Unable to create private package staging directory for ${appName}"
         return 1
     fi
+    # Remove per-attempt staging on every return path (Teams retries would otherwise retain failed downloads)
+    {
+        chmod 700 "${downloadFolder}" || return 1
+        downloadFolder="${downloadFolder}/"
 
-    pkgName="$(basename "${pkgURL}")"
-    expectedSize="$(contentLengthForURL "${pkgURL}")"
+        if [[ -n "${explicitPkgURL}" ]]; then
+            pkgURL="${explicitPkgURL}"
+        else
+            pkgURL="$(downloadResolvedPkgURL "${downloadURL}")"
+        fi
 
-    info "Starting package download for ${appName}: ${pkgURL}"
-    /usr/bin/nscurl --download --large-download --location --download-directory "${downloadFolder}" "${pkgURL}" >>"${scriptLog}" 2>&1 || return 1
-
-    if [[ ! -f "${downloadFolder}${pkgName}" ]]; then
-        errorOut "Downloaded package missing for ${appName}"
-        return 1
-    fi
-
-    if [[ -n "${expectedSize}" ]]; then
-        localSize="$(stat -qf%z "${downloadFolder}${pkgName}" 2>/dev/null)"
-        if [[ -n "${localSize}" && "${localSize}" != "${expectedSize}" ]]; then
-            errorOut "Malformed package download for ${appName}; expected ${expectedSize}, got ${localSize}"
+        if [[ -z "${pkgURL}" ]]; then
+            errorOut "Unable to resolve download URL for ${appName}"
             return 1
         fi
-    fi
 
-    if ! verifyMicrosoftPkgSignature "${downloadFolder}${pkgName}"; then
-        errorOut "Package signature check failed for ${appName}"
-        return 1
-    fi
+        pkgName="$(basename "${pkgURL}")"
+        pkgPath="${downloadFolder}${pkgName}"
+        expectedSize="$(contentLengthForURL "${pkgURL}")"
 
-    info "Installing package for ${appName}"
-    /usr/sbin/installer -pkg "${downloadFolder}${pkgName}" -target / >>"${scriptLog}" 2>&1
+        info "Starting package download for ${appName}: ${pkgURL}"
+        /usr/bin/nscurl --download --large-download --location --download-directory "${downloadFolder}" "${pkgURL}" >>"${scriptLog}" 2>&1 || return 1
+
+        if [[ -L "${pkgPath}" || ! -f "${pkgPath}" ]]; then
+            errorOut "Downloaded package missing or not a regular file for ${appName}"
+            return 1
+        fi
+
+        if [[ "$(stat -f '%u' "${pkgPath}" 2>/dev/null)" != "0" ]]; then
+            errorOut "Downloaded package for ${appName} is not root-owned; refusing to install"
+            return 1
+        fi
+
+        if [[ -n "${expectedSize}" ]]; then
+            localSize="$(stat -qf%z "${pkgPath}" 2>/dev/null)"
+            if [[ -n "${localSize}" && "${localSize}" != "${expectedSize}" ]]; then
+                errorOut "Malformed package download for ${appName}; expected ${expectedSize}, got ${localSize}"
+                return 1
+            fi
+        fi
+
+        if ! verifyMicrosoftPkgSignature "${pkgPath}"; then
+            errorOut "Package signature check failed for ${appName}"
+            return 1
+        fi
+
+        if [[ -n "${removeBeforeInstall}" ]]; then
+            info "Removing existing ${appName} bundle before install: ${removeBeforeInstall}"
+            safeRemove "${removeBeforeInstall}" || return 1
+        fi
+
+        info "Installing package for ${appName}"
+        /usr/sbin/installer -pkg "${pkgPath}" -target / >>"${scriptLog}" 2>&1
+        installRC=$?
+
+        return ${installRC}
+    } always {
+        safeRemove "${downloadFolder%/}"
+    }
 }
 
 function resolveCustomManifest() {
@@ -590,6 +715,12 @@ function resolveCustomManifest() {
 
     manifestServer="$(getPrefValue "com.microsoft.autoupdate2" "ManifestServer" 2>/dev/null)"
     if [[ -z "${manifestServer}" ]]; then
+        echo "|"
+        return 0
+    fi
+
+    if [[ "${manifestServer}" != https://* ]]; then
+        warning "Ignoring non-HTTPS MAU ManifestServer: ${manifestServer}"
         echo "|"
         return 0
     fi
@@ -625,14 +756,15 @@ function maybeRepairOfficeApp() {
     fi
 
     appVersion="$(defaults read "${appPath}/Contents/Info.plist" CFBundleVersion 2>/dev/null)"
-    info "Found ${appName} version ${appVersion}"
+    info "Found ${appName} version ${appVersion:-unreadable}"
 
-    if ! is-at-least 16.17 "${appVersion}"; then
+    # An unreadable version skips version-based checks (is-at-least treats "" as $ZSH_VERSION); codesign check below handles damage
+    if [[ -n "${appVersion}" ]] && ! is-at-least 16.17 "${appVersion}"; then
         appGeneration="2016"
     fi
 
     if [[ "${appGeneration}" == "2019" ]]; then
-        if ! is-at-least 16.73 "${appVersion}" && is-at-least 11.0.0 "${osVersion}"; then
+        if [[ -n "${appVersion}" ]] && ! is-at-least 16.73 "${appVersion}" && is-at-least 11.0.0 "${osVersion}"; then
             info "${appName} is outdated; repairing"
             repairFromMicrosoftPkg "${appName}" "${download2019}" "" || return 1
             repairPerformed="true"
@@ -641,10 +773,9 @@ function maybeRepairOfficeApp() {
         customInfo="$(resolveCustomManifest "${manifestProductID}")"
         fullUpdater="${customInfo%%|*}"
         customVersion="${customInfo##*|}"
-        if [[ -n "${customVersion}" && "${appVersion}" != "${customVersion}" ]]; then
+        if [[ -n "${appVersion}" && -n "${customVersion}" && "${appVersion}" != "${customVersion}" ]]; then
             info "${appName} pinned version mismatch (${appVersion} != ${customVersion}); reinstalling"
-            safeRemove "${appPath}"
-            repairFromMicrosoftPkg "${appName}" "${download2019}" "${fullUpdater}" || return 1
+            repairFromMicrosoftPkg "${appName}" "${download2019}" "${fullUpdater}" "${appPath}" || return 1
             repairPerformed="true"
         fi
     else
@@ -662,13 +793,12 @@ function maybeRepairOfficeApp() {
             warning "${appName} codesign mismatch limited to OLE.framework; proceeding"
         else
             warning "${appName} app bundle damaged; reinstalling"
-            safeRemove "${appPath}"
             if [[ "${appGeneration}" == "2016" ]]; then
-                repairFromMicrosoftPkg "${appName}" "${download2016}" "" || return 1
+                repairFromMicrosoftPkg "${appName}" "${download2016}" "" "${appPath}" || return 1
             else
                 customInfo="$(resolveCustomManifest "${manifestProductID}")"
                 fullUpdater="${customInfo%%|*}"
-                repairFromMicrosoftPkg "${appName}" "${download2019}" "${fullUpdater}" || return 1
+                repairFromMicrosoftPkg "${appName}" "${download2019}" "${fullUpdater}" "${appPath}" || return 1
             fi
             repairPerformed="true"
         fi
@@ -690,8 +820,8 @@ function maybeRepairOfficeApp() {
 ####################################################################################################
 
 function dialogInstall() {
+    setopt localoptions noxtrace
     local dialogURL
-    local expectedTeamID="PWA5E9TQ59"
     local tempPkgDir
 
     dialogURL="$(curl -L --silent --fail --connect-timeout 10 --max-time 30 \
@@ -701,45 +831,91 @@ function dialogInstall() {
     [[ -n "${dialogURL}" ]] || fatal "Failed to retrieve swiftDialog download URL"
     [[ "${dialogURL}" == https://github.com/* ]] || fatal "Invalid swiftDialog URL: ${dialogURL}"
 
-    tempPkgDir="$(mktemp -d /private/tmp/dialog-install.XXXXXX)"
+    # Root-private staging inside workDirectory; fatal exits are cleaned up by the EXIT trap
+    tempPkgDir="$(mktemp -d "${workDirectory}/dialog-install.XXXXXX")"
+    [[ -n "${tempPkgDir}" && -d "${tempPkgDir}" ]] || fatal "Unable to create private swiftDialog staging directory"
+    chmod 700 "${tempPkgDir}" || fatal "Unable to secure swiftDialog staging directory"
+    local pkgPath="${tempPkgDir}/Dialog.pkg"
 
-    if ! curl -L --silent --fail --connect-timeout 10 --max-time 60 "${dialogURL}" -o "${tempPkgDir}/Dialog.pkg"; then
-        rm -rf "${tempPkgDir}"
-        fatal "Failed to download swiftDialog package"
+    curl -L --silent --fail --connect-timeout 10 --max-time 60 "${dialogURL}" -o "${pkgPath}" \
+        || fatal "Failed to download swiftDialog package"
+
+    if [[ -L "${pkgPath}" || ! -f "${pkgPath}" || "$(stat -f '%u' "${pkgPath}" 2>/dev/null)" != "0" ]]; then
+        fatal "Downloaded swiftDialog package missing, not a regular file, or not root-owned; refusing to install"
     fi
 
+    local spctlOutput
     local teamID
-    teamID="$(spctl -a -vv -t install "${tempPkgDir}/Dialog.pkg" 2>&1 | awk -F'[()]' '/origin=/{print $2}' | tr -d ' ')"
-    if [[ "${teamID}" != "${expectedTeamID}" ]]; then
-        rm -rf "${tempPkgDir}"
-        fatal "swiftDialog package team ID mismatch: ${teamID}"
+    spctlOutput="$(spctl -a -vv -t install "${pkgPath}" 2>&1)" || fatal "swiftDialog package failed Gatekeeper assessment"
+    teamID="$(awk -F'[()]' '/origin=/{print $2}' <<< "${spctlOutput}" | tr -d ' ')"
+    [[ "${teamID}" == "${swiftDialogTeamID}" ]] || fatal "swiftDialog package team ID mismatch: ${teamID}"
+
+    /usr/sbin/installer -pkg "${pkgPath}" -target / >>"${scriptLog}" 2>&1 || fatal "swiftDialog installation failed"
+
+    safeRemove "${tempPkgDir}"
+}
+
+function dialogTrustCheck() {
+    # Validates the swiftDialog link and its target; on success, pins dialogBinary to the resolved path
+    local resolvedPath
+    local pathToCheck
+    local ownerMode
+
+    if [[ -L "${dialogLinkPath}" && "$(stat -f '%u' "${dialogLinkPath}" 2>/dev/null)" != "0" ]]; then
+        warning "swiftDialog link is not root-owned: ${dialogLinkPath}"
+        return 1
     fi
 
-    /usr/sbin/installer -pkg "${tempPkgDir}/Dialog.pkg" -target / >>"${scriptLog}" 2>&1 || {
-        rm -rf "${tempPkgDir}"
-        fatal "swiftDialog installation failed"
-    }
+    resolvedPath="${dialogLinkPath:A}"
+    if [[ "${resolvedPath}" != "${swiftDialogAppPath}/Contents/MacOS/"* || ! -x "${resolvedPath}" ]]; then
+        warning "swiftDialog binary does not resolve inside ${swiftDialogAppPath}: ${resolvedPath}"
+        return 1
+    fi
 
-    rm -rf "${tempPkgDir}"
+    for pathToCheck in "${resolvedPath}" "${resolvedPath:h}" "${resolvedPath:h:h}" "${swiftDialogAppPath}" "${swiftDialogAppPath:h}"; do
+        ownerMode="$(stat -f '%u %Lp' "${pathToCheck}" 2>/dev/null)"
+        if [[ -z "${ownerMode}" || "${ownerMode%% *}" != "0" ]] || (( 8#${ownerMode##* } & 8#022 )); then
+            warning "swiftDialog path is not root-owned or is group/other-writable: ${pathToCheck} (${ownerMode:-unknown})"
+            return 1
+        fi
+    done
+
+    # Validate the signature and signing identity (not just the displayed Team ID)
+    if ! /usr/bin/codesign --verify -R="anchor apple generic and certificate leaf[subject.OU] = \"${swiftDialogTeamID}\"" "${swiftDialogAppPath}" >>"${scriptLog}" 2>&1; then
+        warning "swiftDialog signature does not satisfy Team ID ${swiftDialogTeamID} requirement: ${swiftDialogAppPath}"
+        return 1
+    fi
+
+    dialogBinary="${resolvedPath}"
+    return 0
 }
 
 function dialogCheck() {
-    if [[ ! -x "${dialogBinary}" ]]; then
+    if [[ ! -x "${dialogLinkPath}" ]]; then
         preFlight "swiftDialog binary not found; installing"
         dialogInstall
     fi
 
+    if ! dialogTrustCheck; then
+        preFlight "swiftDialog failed trust validation; reinstalling"
+        dialogInstall
+        dialogTrustCheck || fatal "swiftDialog failed trust validation after reinstall; refusing to run as root"
+    fi
+
     local installedVersion
-    installedVersion="$(${dialogBinary} --version 2>/dev/null | awk '{print $NF}' | tr -d '()')"
+    installedVersion="$("${dialogBinary}" --version 2>/dev/null | awk '{print $NF}' | tr -d '()')"
     if [[ -z "${installedVersion}" ]]; then
         preFlight "Unable to read swiftDialog version; reinstalling"
         dialogInstall
-        installedVersion="$(${dialogBinary} --version 2>/dev/null | awk '{print $NF}' | tr -d '()')"
+        dialogTrustCheck || fatal "swiftDialog failed trust validation after reinstall; refusing to run as root"
+        installedVersion="$("${dialogBinary}" --version 2>/dev/null | awk '{print $NF}' | tr -d '()')"
+        [[ -n "${installedVersion}" ]] || fatal "Unable to read swiftDialog version after reinstall"
     fi
 
     if ! is-at-least "${swiftDialogMinimumRequiredVersion}" "${installedVersion}"; then
         preFlight "swiftDialog ${installedVersion} is below required ${swiftDialogMinimumRequiredVersion}; upgrading"
         dialogInstall
+        dialogTrustCheck || fatal "swiftDialog failed trust validation after reinstall; refusing to run as root"
     fi
 }
 
@@ -757,11 +933,11 @@ function formattedElapsedTime() {
 function showIntroDialog() {
     [[ "${operationMode}" == "silent" ]] && return 0
 
-    ${dialogBinary} \
+    "${dialogBinary}" \
         --title "${humanReadableScriptName}" \
         --infotext "${scriptVersion}" \
         --messagefont "size=${fontSize}" \
-        --message "This tool _may_ help address Microsoft 365-related issues on this Mac:\n- Repair\n- Reset\n- Remove\n\nClick **Continue** to select actions; click **Cancel** to exit." \
+        --message "This tool _may_ help address Microsoft 365-related issues on this Mac:\n- Repair\n- Reset\n- Remove\n\n**Save your work first:** selected actions quit Microsoft apps without saving, and some actions permanently remove local data.\n\nClick **Continue** to select actions; click **Cancel** to exit." \
         --icon "${applicationIcon}" \
         --overlayicon "${organizationOverlayiconURL}" \
         --button1text "Continue" \
@@ -835,16 +1011,18 @@ function showSelectionDialog() {
     local messageText
     local dialogOutput
     local rc
-    local normalizedOperationCSV="${operationCSV//[[:space:]]/}"
 
-    normalizedOperationCSV="${normalizedOperationCSV//,/}"
-
-    if [[ -n "${normalizedOperationCSV}" ]]; then
+    if ! operationCSVIsEmpty; then
         parseOperationCSV "${operationCSV}"
         validateOperationIDs "${selectedOperations[@]}"
         allowedOperations=("${selectedOperations[@]}")
         selectedOperations=()
     else
+        if [[ "${allowAllOperations}" == "true" ]]; then
+            warning "No --operations / \$5 allowlist supplied; --allow-all-operations / \$6 opt-in set; showing all ${#operationIDs[@]} operations"
+        else
+            warning "No --operations / \$5 allowlist supplied; showing all ${#operationIDs[@]} operations (${operationMode} mode)"
+        fi
         allowedOperations=("${operationIDs[@]}")
     fi
 
@@ -864,7 +1042,7 @@ function showSelectionDialog() {
             messageText="${messageText}\n\n:red[${warningMessage}]"
         fi
 
-        dialogOutput="$(${dialogBinary} \
+        dialogOutput="$("${dialogBinary}" \
             --title "${humanReadableScriptName}" \
             --infotext "${scriptVersion}" \
             --messagefont "size=${fontSize}" \
@@ -965,15 +1143,16 @@ function confirmDestructiveSelection() {
     isOperationSelected remove_office && requiresConfirmation="true"
     isOperationSelected remove_outlook_data && requiresConfirmation="true"
     isOperationSelected remove_onenote_data && requiresConfirmation="true"
+    isOperationSelected remove_defender && requiresConfirmation="true"
 
     [[ "${requiresConfirmation}" == "false" ]] && return 0
     [[ "${operationMode}" == "silent" ]] && return 0
 
-    ${dialogBinary} \
+    "${dialogBinary}" \
         --title "Confirm Destructive Actions" \
         --infotext "${scriptVersion}" \
         --messagefont "size=${fontSize}" \
-        --message "**:red[Warning:]** You selected one or more destructive actions that can permanently remove local data.\n\nConfirm to proceed." \
+        --message "**:red[Warning:]** You selected one or more destructive actions that can permanently remove local data or security tooling.\n\nConfirm to proceed." \
         --icon "SF=exclamationmark.triangle, weight=bold, colour1=red" \
         --checkbox "I understand these actions are destructive,name=confirm_destructive,enableButton1" \
         --json \
@@ -992,6 +1171,8 @@ function confirmDestructiveSelection() {
         exit 2
     fi
 
+    info "User '${loggedInUser}' acknowledged destructive confirmation"
+
     return 0
 }
 
@@ -1000,15 +1181,17 @@ function startProgressDialog() {
 
     local progressMessage
 
+    # Keep command file root-owned; swiftDialog only needs read access
+    if [[ -L "${dialogCommandFile}" || ! -f "${dialogCommandFile}" ]]; then
+        warning "swiftDialog command file missing or replaced by a symlink; recreating in ${workDirectory}"
+        dialogCommandFile="$(mktemp "${workDirectory}/dialogCommandFile_${scriptName}.XXXX")"
+    fi
     : > "${dialogCommandFile}"
     chmod 644 "${dialogCommandFile}" 2>/dev/null
-    if [[ -n "${loggedInUser}" ]]; then
-        /usr/sbin/chown "${loggedInUser}" "${dialogCommandFile}" 2>/dev/null
-    fi
 
     progressMessage="$(progressDialogMessage)"
 
-    ${dialogBinary} \
+    "${dialogBinary}" \
         --title "${humanReadableScriptName}" \
         --infotext "${scriptVersion}" \
         --messagefont "size=${fontSize}" \
@@ -1102,7 +1285,7 @@ function showCompletionDialog() {
         summary+="<br><br>Repaired this run; cleanup deferred until a later run: ${(j:, :)repairedTitles}"
     fi
 
-    ${dialogBinary} \
+    "${dialogBinary}" \
         --title "${humanReadableScriptName}" \
         --infotext "${scriptVersion}" \
         --messagefont "size=${fontSize}" \
@@ -1144,7 +1327,7 @@ function promptForRestart() {
     local rc
     local restartFontSize=$(( fontSize > 2 ? fontSize - 2 : fontSize ))
 
-    ${dialogBinary} \
+    "${dialogBinary}" \
         --title "Restart Recommended" \
         --infotext "${scriptVersion}" \
         --messagefont "size=${restartFontSize}" \
@@ -1291,7 +1474,7 @@ function removeOfficePreinstall() {
     safeRemove "/Applications/Microsoft Teams.app"
     safeRemove "/Applications/Microsoft Teams classic.app"
     safeRemove "/Applications/Microsoft Teams (work or school).app"
-    rm -rf /Applications/CodeSignSummary-*.md >>"${scriptLog}" 2>&1
+    safeRemoveMatches /Applications/CodeSignSummary-*.md(N)
 
     safeRemove "/Library/Application Support/Microsoft/MAU2.0"
     safeRemove "/Library/Application Support/Microsoft/MERP2.0"
@@ -1448,7 +1631,6 @@ function removeOfficePostinstall() {
         com.microsoft.teams
         com.microsoft.teams2
         com.microsoft.MSTeamsAudioDevice
-        com.microsoft.wdav
         com.microsoft.OneDrive
     )
 
@@ -1466,8 +1648,8 @@ function removeOfficePostinstall() {
     safeRemove "${loggedInUserHome}/Library/Cookies/com.microsoft.OneDriveStandaloneUpdater.binarycookies"
     safeRemove "${loggedInUserHome}/Library/Cookies/com.microsoft.teams.binarycookies"
 
-    safeRemove "/Library/Logs/Microsoft"
-    safeRemove "/Library/Application Support/Microsoft"
+    # Office-owned children of /Library/Application Support/Microsoft are removed in preinstall;
+    # the parent is retained (MOFA-aligned) so Defender, Edge, and other Microsoft products keep their data
     safeRemove "/Users/Shared/OnDemandInstaller"
 }
 
@@ -1576,7 +1758,7 @@ function cleanupOfficeCommonGroupContainers() {
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/FontCache"
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/ComRPC32"
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/TemporaryItems"
-    rm -f "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office"/Microsoft\ Office\ ACL* >>"${scriptLog}" 2>&1
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office"/Microsoft\ Office\ ACL*(N)
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/MicrosoftRegistrationDB.reg"
 }
 
@@ -1609,14 +1791,14 @@ function op_reset_word() {
     safeRemove "/Applications/.Microsoft Word.app.installBackup"
 
     safeRemove "/Library/Application Support/Microsoft/Office365/User Content.localized/Startup.localized/Word"
-    rm -rf "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.dot >>"${scriptLog}" 2>&1
-    rm -rf "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.dotx >>"${scriptLog}" 2>&1
-    rm -rf "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.dotm >>"${scriptLog}" 2>&1
+    safeRemoveMatches "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.dot(N)
+    safeRemoveMatches "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.dotx(N)
+    safeRemoveMatches "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.dotm(N)
 
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Startup.localized/Word"
-    rm -rf "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.dot >>"${scriptLog}" 2>&1
-    rm -rf "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.dotx >>"${scriptLog}" 2>&1
-    rm -rf "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.dotm >>"${scriptLog}" 2>&1
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.dot(N)
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.dotx(N)
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.dotm(N)
 
     cleanupOfficeCommonGroupContainers
 
@@ -1653,21 +1835,21 @@ function op_reset_excel() {
     safeRemove "/Applications/.Microsoft Excel.app.installBackup"
 
     safeRemove "/Library/Application Support/Microsoft/Office365/User Content.localized/Startup.localized/Excel"
-    rm -rf "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.xlt >>"${scriptLog}" 2>&1
-    rm -rf "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.xltx >>"${scriptLog}" 2>&1
-    rm -rf "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.xltm >>"${scriptLog}" 2>&1
+    safeRemoveMatches "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.xlt(N)
+    safeRemoveMatches "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.xltx(N)
+    safeRemoveMatches "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.xltm(N)
 
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Startup.localized/Excel"
-    rm -rf "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.xlt >>"${scriptLog}" 2>&1
-    rm -rf "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.xltx >>"${scriptLog}" 2>&1
-    rm -rf "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.xltm >>"${scriptLog}" 2>&1
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.xlt(N)
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.xltx(N)
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.xltm(N)
 
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/mip_policy"
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/ComRPC32"
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/TemporaryItems"
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/MicrosoftRegistrationDB.reg"
 
-    /usr/bin/security delete-certificate -c 'Microsoft.Office.Excel.ProtectedDataServices' >>"${scriptLog}" 2>&1
+    runKeychainDelete "certificate 'Microsoft.Office.Excel.ProtectedDataServices'" "${loggedInUser}" 1 delete-certificate -c 'Microsoft.Office.Excel.ProtectedDataServices'
 
     safeRemove "${TMPDIR}/com.microsoft.Excel"
     return 0
@@ -1702,17 +1884,17 @@ function op_reset_powerpoint() {
     safeRemove "/Applications/.Microsoft PowerPoint.app.installBackup"
 
     safeRemove "/Library/Application Support/Microsoft/Office365/User Content.localized/Startup.localized/PowerPoint"
-    rm -rf "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.pot >>"${scriptLog}" 2>&1
-    rm -rf "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.potx >>"${scriptLog}" 2>&1
-    rm -rf "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.potm >>"${scriptLog}" 2>&1
+    safeRemoveMatches "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.pot(N)
+    safeRemoveMatches "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.potx(N)
+    safeRemoveMatches "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.potm(N)
 
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Startup.localized/PowerPoint"
-    rm -rf "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.pot >>"${scriptLog}" 2>&1
-    rm -rf "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.potx >>"${scriptLog}" 2>&1
-    rm -rf "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.potm >>"${scriptLog}" 2>&1
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.pot(N)
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.potx(N)
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.potm(N)
 
-    rm -rf "/Library/Application Support/Microsoft/Office365/User Content.localized/Add-Ins"/*.ppam >>"${scriptLog}" 2>&1
-    rm -rf "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Add-Ins"/*.ppam >>"${scriptLog}" 2>&1
+    safeRemoveMatches "/Library/Application Support/Microsoft/Office365/User Content.localized/Add-Ins"/*.ppam(N)
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Add-Ins"/*.ppam(N)
     safeRemove "/Library/Application Support/Microsoft/Office365/User Content.localized/Themes"
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Themes"
 
@@ -1863,14 +2045,14 @@ function op_reset_onedrive() {
     if [[ -d "/Applications/OneDrive.app" ]]; then
         local oneDriveVersion
         oneDriveVersion="$(defaults read /Applications/OneDrive.app/Contents/Info.plist CFBundleVersion 2>/dev/null)"
-        if ! is-at-least 23154.0 "${oneDriveVersion}" && is-at-least 10.15 "${osVersion}"; then
+        if [[ -n "${oneDriveVersion}" ]] && ! is-at-least 23154.0 "${oneDriveVersion}" && is-at-least 10.15 "${osVersion}"; then
             repairFromMicrosoftPkg "Microsoft OneDrive" "https://go.microsoft.com/fwlink/?linkid=861011" "" || return 1
         fi
 
         /usr/bin/codesign -vv --deep /Applications/OneDrive.app >>"${scriptLog}" 2>&1
         if [[ $? -ne 0 ]]; then
-            safeRemove "/Applications/OneDrive.app"
-            repairFromMicrosoftPkg "Microsoft OneDrive" "https://go.microsoft.com/fwlink/?linkid=861011" "" || return 1
+            warning "Microsoft OneDrive app bundle damaged; replacing after package verification"
+            repairFromMicrosoftPkg "Microsoft OneDrive" "https://go.microsoft.com/fwlink/?linkid=861011" "" "/Applications/OneDrive.app" || return 1
         fi
     fi
 
@@ -1976,11 +2158,14 @@ function resetTeamsOperation() {
     local teamsPkgURL="https://go.microsoft.com/fwlink/?linkid=2249065"
     local classicBackgroundsPath="${loggedInUserHome}/Library/Application Support/Microsoft/Teams/Backgrounds"
     local modernBackgroundsPath="${loggedInUserHome}/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/Backgrounds"
-    local modernBackgroundsStaging="/tmp/${scriptName}_Teams_Backgrounds"
+    local modernBackgroundsStagingRoot=""
+    local modernBackgroundsStaging=""
     local teamsBackgroundArchive="${loggedInUserHome}/Teams_Old_Backgrounds"
     local installAttempt=1
     local installationRetries=5
     local shouldInstallTeams="${forceReinstall}"
+    local teamsInstalled="false"
+    local teamsReplacePath=""    # removed only after the replacement package downloads and verifies
     osVersion="$(sw_vers -productVersion)"
 
     pkill -9 'MSTeams' 2>/dev/null
@@ -1996,12 +2181,12 @@ function resetTeamsOperation() {
         currentTeamsVersion="$(defaults read "${teamsAppPath}/Contents/Info.plist" CFBundleVersion 2>/dev/null)"
         info "Found Microsoft Teams version ${currentTeamsVersion}"
         if [[ "${forceReinstall}" == "true" ]]; then
-            info "Force reinstall requested for Microsoft Teams; removing existing app bundle"
-            safeRemove "${teamsAppPath}"
+            info "Force reinstall requested for Microsoft Teams; replacing existing app bundle after package verification"
+            teamsReplacePath="${teamsAppPath}"
             shouldInstallTeams="true"
-        elif ! is-at-least 23247.0 "${currentTeamsVersion}" && is-at-least 10.15 "${osVersion}"; then
-            info "Installed Microsoft Teams is below MOFA minimum; removing for reinstall"
-            safeRemove "${teamsAppPath}"
+        elif [[ -n "${currentTeamsVersion}" ]] && ! is-at-least 23247.0 "${currentTeamsVersion}" && is-at-least 10.15 "${osVersion}"; then
+            info "Installed Microsoft Teams is below MOFA minimum; replacing after package verification"
+            teamsReplacePath="${teamsAppPath}"
             shouldInstallTeams="true"
         fi
     fi
@@ -2018,23 +2203,42 @@ function resetTeamsOperation() {
         shouldInstallTeams="true"
     fi
 
-    if [[ -d "${classicBackgroundsPath}" ]]; then
+    if [[ -d "${classicBackgroundsPath}" ]] && ! pathHasTrustedParents "${classicBackgroundsPath}"; then
+        warning "Skipping classic Teams background archive; a parent directory resolves through a symlink: ${classicBackgroundsPath}"
+    elif [[ -d "${classicBackgroundsPath}" ]]; then
         local originalArchivePath="${teamsBackgroundArchive}"
         local archiveCounter=0
-        while [[ -e "${teamsBackgroundArchive}" ]]; do
+        while [[ -e "${teamsBackgroundArchive}" || -L "${teamsBackgroundArchive}" ]]; do
             ((archiveCounter++))
             teamsBackgroundArchive="${originalArchivePath}${archiveCounter}"
         done
-        /bin/mv "${classicBackgroundsPath}" "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1
+        # -h: never follow a destination symlink planted after the name check
+        if ! /bin/mv -h "${classicBackgroundsPath}" "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1; then
+            errorOut "Unable to archive classic Teams backgrounds; skipping Teams reset to preserve them"
+            return 1
+        fi
         /usr/sbin/chown -R "${loggedInUser}" "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1
         if [[ "${operationMode}" != "silent" ]]; then
             runAsUser "${loggedInUser}" /usr/bin/open "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1
         fi
     fi
 
-    if [[ -d "${modernBackgroundsPath}" ]]; then
-        [[ -e "${modernBackgroundsStaging}" ]] && rm -rf "${modernBackgroundsStaging}" >>"${scriptLog}" 2>&1
-        /bin/mv "${modernBackgroundsPath}" "${modernBackgroundsStaging}" >>"${scriptLog}" 2>&1
+    if [[ -d "${modernBackgroundsPath}" ]] && ! pathHasTrustedParents "${modernBackgroundsPath}"; then
+        warning "Skipping Teams background staging; a parent directory resolves through a symlink: ${modernBackgroundsPath}"
+    elif [[ -d "${modernBackgroundsPath}" ]]; then
+        # Root-private staging outside workDirectory so backgrounds survive a failed restore
+        modernBackgroundsStagingRoot="$(mktemp -d "/private/tmp/${scriptName}_Teams_Backgrounds.XXXXXX")"
+        if [[ -n "${modernBackgroundsStagingRoot}" && -d "${modernBackgroundsStagingRoot}" ]]; then
+            modernBackgroundsStaging="${modernBackgroundsStagingRoot}/Backgrounds"
+            if ! /bin/mv "${modernBackgroundsPath}" "${modernBackgroundsStaging}" >>"${scriptLog}" 2>&1; then
+                errorOut "Unable to stage Teams backgrounds; skipping Teams reset to preserve them"
+                /bin/rmdir "${modernBackgroundsStagingRoot}" 2>/dev/null
+                return 1
+            fi
+        else
+            errorOut "Unable to create private Teams background staging directory; skipping Teams reset to preserve backgrounds"
+            return 1
+        fi
     fi
 
     safeRemove "${loggedInUserHome}/Library/Application Support/Teams"
@@ -2096,39 +2300,54 @@ function resetTeamsOperation() {
     deleteGenericByLabel 'com.microsoft.teams.HockeySDK' "${loggedInUser}"
     deleteGenericByLabel 'com.microsoft.teams.helper.HockeySDK' "${loggedInUser}"
 
-    if [[ -d "${modernBackgroundsStaging}" ]]; then
-        /bin/mkdir -p "$(dirname "${modernBackgroundsPath}")" >>"${scriptLog}" 2>&1
-        /bin/mv "${modernBackgroundsStaging}" "${modernBackgroundsPath}" >>"${scriptLog}" 2>&1
-        /usr/sbin/chown -R "${loggedInUser}" "$(dirname "${modernBackgroundsPath}")" >>"${scriptLog}" 2>&1
+    if [[ -n "${modernBackgroundsStaging}" && -d "${modernBackgroundsStaging}" && ! -L "${modernBackgroundsStaging}" ]]; then
+        # Create the container path as the user (MOFA-aligned) so parents are not left root-owned
+        runAsUser "${loggedInUser}" /bin/mkdir -p "$(dirname "${modernBackgroundsPath}")" >>"${scriptLog}" 2>&1
+        if ! pathHasTrustedParents "${modernBackgroundsPath}"; then
+            warning "Unable to restore Teams backgrounds; a parent directory resolves through a symlink; retained at ${modernBackgroundsStaging}"
+        elif [[ -e "${modernBackgroundsPath}" || -L "${modernBackgroundsPath}" ]]; then
+            warning "Unable to restore Teams backgrounds; destination already exists; retained at ${modernBackgroundsStaging}"
+        elif /bin/mv -h "${modernBackgroundsStaging}" "${modernBackgroundsPath}" >>"${scriptLog}" 2>&1; then
+            /usr/sbin/chown -R "${loggedInUser}" "$(dirname "${modernBackgroundsPath}")" >>"${scriptLog}" 2>&1
+        else
+            warning "Unable to restore Teams backgrounds; retained at ${modernBackgroundsStaging}"
+        fi
+    fi
+    if [[ -n "${modernBackgroundsStagingRoot}" && -d "${modernBackgroundsStagingRoot}" ]]; then
+        /bin/rmdir "${modernBackgroundsStagingRoot}" 2>/dev/null
     fi
 
-    if [[ -d "${teamsAppPath}" ]]; then
+    if [[ -d "${teamsAppPath}" && -z "${teamsReplacePath}" ]]; then
         /usr/bin/codesign -vv --deep "${teamsAppPath}" >>"${scriptLog}" 2>&1
         if [[ $? -ne 0 ]]; then
-            warning "Microsoft Teams app bundle damaged; reinstalling"
-            safeRemove "${teamsAppPath}"
+            warning "Microsoft Teams app bundle damaged; replacing after package verification"
+            teamsReplacePath="${teamsAppPath}"
             shouldInstallTeams="true"
         else
             info "Microsoft Teams codesign verification passed"
         fi
     fi
 
-    while [[ "${shouldInstallTeams}" == "true" && ! -d "${teamsAppPath}" && ${installAttempt} -le ${installationRetries} ]]; do
+    while [[ "${shouldInstallTeams}" == "true" && ${installAttempt} -le ${installationRetries} ]]; do
         info "Installing Microsoft Teams (attempt ${installAttempt}/${installationRetries})"
-        repairFromMicrosoftPkg "Microsoft Teams" "${teamsPkgURL}" "" || return 1
-        /usr/bin/codesign -vv --deep "${teamsAppPath}" >>"${scriptLog}" 2>&1
-        if [[ $? -eq 0 ]]; then
-            local installedTeamsVersion
-            installedTeamsVersion="$(defaults read "${teamsAppPath}/Contents/Info.plist" CFBundleVersion 2>/dev/null)"
-            info "Microsoft Teams installed successfully at version ${installedTeamsVersion}"
-            break
+        if repairFromMicrosoftPkg "Microsoft Teams" "${teamsPkgURL}" "" "${teamsReplacePath}"; then
+            /usr/bin/codesign -vv --deep "${teamsAppPath}" >>"${scriptLog}" 2>&1
+            if [[ $? -eq 0 ]]; then
+                local installedTeamsVersion
+                installedTeamsVersion="$(defaults read "${teamsAppPath}/Contents/Info.plist" CFBundleVersion 2>/dev/null)"
+                info "Microsoft Teams installed successfully at version ${installedTeamsVersion}"
+                teamsInstalled="true"
+                break
+            fi
+            warning "Microsoft Teams app bundle failed codesign after install attempt ${installAttempt}; retrying"
+            teamsReplacePath="${teamsAppPath}"
+        else
+            warning "Microsoft Teams package download or install failed on attempt ${installAttempt}; retrying"
         fi
-        warning "Microsoft Teams app bundle failed codesign after install attempt ${installAttempt}; removing and retrying"
-        safeRemove "${teamsAppPath}"
         ((installAttempt++))
     done
 
-    if [[ "${shouldInstallTeams}" == "true" && ! -d "${teamsAppPath}" ]]; then
+    if [[ "${shouldInstallTeams}" == "true" && "${teamsInstalled}" != "true" ]]; then
         errorOut "Unable to install a valid Microsoft Teams app bundle"
         return 1
     fi
@@ -2214,15 +2433,14 @@ function op_reset_autoupdate() {
     if [[ -d "${mauAppPath}" ]]; then
         local mauVersion
         mauVersion="$(defaults read "${mauAppPath}/Contents/Info.plist" CFBundleVersion 2>/dev/null)"
-        if ! is-at-least 4.49 "${mauVersion}"; then
+        if [[ -n "${mauVersion}" ]] && ! is-at-least 4.49 "${mauVersion}"; then
             info "Microsoft AutoUpdate is below MOFA minimum; repairing"
             repairFromMicrosoftPkg "Microsoft AutoUpdate" "https://go.microsoft.com/fwlink/?linkid=830196" "" || return 1
         fi
         /usr/bin/codesign -vv --deep "${mauAppPath}" >>"${scriptLog}" 2>&1
         if [[ $? -ne 0 ]]; then
-            warning "Microsoft AutoUpdate app bundle damaged; reinstalling"
-            safeRemove "${mauAppPath}"
-            repairFromMicrosoftPkg "Microsoft AutoUpdate" "https://go.microsoft.com/fwlink/?linkid=830196" "" || return 1
+            warning "Microsoft AutoUpdate app bundle damaged; replacing after package verification"
+            repairFromMicrosoftPkg "Microsoft AutoUpdate" "https://go.microsoft.com/fwlink/?linkid=830196" "" "${mauAppPath}" || return 1
         fi
     fi
 
@@ -2416,12 +2634,20 @@ function op_remove_skypeforbusiness() {
 function op_remove_defender() {
     info "Starting operation: remove_defender"
 
+    local defenderAppPath="/Applications/Microsoft Defender.app"
+    local defenderUninstaller="${defenderAppPath}/Contents/Resources/Tools/uninstall/uninstall"
+    local defenderStatus=0
+
     pkill -9 'Microsoft Defender*' 2>/dev/null
 
-    if [[ -e "/Applications/Microsoft Defender.app/Contents/Resources/Tools/uninstall/uninstall" ]]; then
-        /Applications/Microsoft\ Defender.app/Contents/Resources/Tools/uninstall/uninstall >>"${scriptLog}" 2>&1
+    if [[ -e "${defenderUninstaller}" ]]; then
+        "${defenderUninstaller}" >>"${scriptLog}" 2>&1
+        defenderStatus=$?
+        if [[ ${defenderStatus} -ne 0 ]]; then
+            errorOut "Microsoft Defender uninstaller exited ${defenderStatus}"
+        fi
     else
-        safeRemove "/Applications/Microsoft Defender.app"
+        safeRemove "${defenderAppPath}" || defenderStatus=1
     fi
 
     safeRemove "${loggedInUserHome}/Library/Application Scripts/UBF8T346G9.com.microsoft.wdav"
@@ -2445,7 +2671,12 @@ function op_remove_defender() {
     /usr/sbin/pkgutil --forget com.microsoft.dlp.daemon >>"${scriptLog}" 2>&1
     /usr/sbin/pkgutil --forget com.microsoft.dlp.agent >>"${scriptLog}" 2>&1
 
-    return 0
+    if [[ -d "${defenderAppPath}" ]]; then
+        errorOut "Microsoft Defender app bundle still present after removal: ${defenderAppPath}"
+        defenderStatus=1
+    fi
+
+    return ${defenderStatus}
 }
 
 function op_remove_acrobat_addin() {
@@ -2617,16 +2848,20 @@ function preflightChecks() {
 
     loggedInUserFullname="$(id -F "${loggedInUser}" 2>/dev/null)"
     loggedInUserID="$(id -u "${loggedInUser}" 2>/dev/null)"
-    loggedInUserHomeDirectory="$(dscl . read "/Users/${loggedInUser}" NFSHomeDirectory 2>/dev/null | awk -F ' ' '{print $2}')"
-    if [[ -z "${loggedInUserHomeDirectory}" ]]; then
-        loggedInUserHomeDirectory="$(setHomeFolder "${loggedInUser}")"
-    fi
-    if [[ -z "${loggedInUserHomeDirectory}" || "${loggedInUserHomeDirectory}" == "/var/root" ]]; then
+    loggedInUserHomeDirectory="$(setHomeFolder "${loggedInUser}")"
+    loggedInUserHomeDirectory="${loggedInUserHomeDirectory%/}"
+    # A home of "/" would turn "${loggedInUserHome}/Library/..." into system paths
+    if [[ -z "${loggedInUserHomeDirectory}" || "${loggedInUserHomeDirectory}" != /* || ! -d "${loggedInUserHomeDirectory}" ]] \
+        || [[ "${loggedInUserHomeDirectory:A}" == "/" || "${loggedInUserHomeDirectory:A}" == "/private/var/root" ]]; then
         fatal "Resolved unsafe home directory for user '${loggedInUser}': ${loggedInUserHomeDirectory}"
     fi
     loggedInUserHome="${loggedInUserHomeDirectory}"
 
     preFlight "Running as root; user: ${loggedInUserFullname} (${loggedInUser}) [${loggedInUserID}]; home: ${loggedInUserHome}"
+
+    if [[ "${operationMode}" == "self-service" && "${allowAllOperations}" != "true" ]] && operationCSVIsEmpty; then
+        fatal "No --operations / \$5 allowlist supplied in self-service mode; supply an allowlist, or pass --allow-all-operations / set \$6 to true for admin-only policies"
+    fi
 
     if [[ "${operationMode}" != "silent" ]]; then
         dialogCheck

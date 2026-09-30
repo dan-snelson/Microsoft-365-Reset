@@ -2,6 +2,50 @@
 
 ## Changelog
 
+### Version 2.0.0 (30-Sep-2026)
+- Addressed critical findings from a second Monocle security review
+    - :warning: **Breaking Change:** :warning: `self-service` mode now exits `10` during preflight when no `--operations` / `$5` allowlist is supplied; pass `--allow-all-operations` or set Parameter `$6` to `true` for deliberately broad, admin-only policies (`test` and `debug` keep the logged `WARNING`)
+    - `remove_office` no longer deletes `/Library/Application Support/Microsoft` or forgets the Defender (`com.microsoft.wdav`) package receipt, matching current MOFA Office Removal; Office-owned `MAU2.0`, `MERP2.0`, and `Office365` are still removed, and Defender and Edge data under `/Library/Application Support/Microsoft` are preserved (like MOFA, the shared `/Library/Logs/Microsoft` folder is still removed)
+    - `remove_defender` now fails (exit `20`) when the Defender uninstaller exits non-zero or the app bundle remains
+    - Auto-repair removes a damaged app (Word, Excel, PowerPoint, Outlook, OneNote, OneDrive, Teams, and MAU), a version-mismatched Office app, or an outdated Teams app only after the replacement package downloads and passes verification; outdated Office apps, OneDrive, and MAU are still updated in place
+    - `reset_teams` / `reset_teams_force` retry a failed Teams package download up to five times (MOFA-aligned) instead of stopping after the first failure
+    - Removals under the console user's home folder refuse any path whose parent directories resolve through a symlink, so a user-planted link cannot redirect a root deletion; Office template and add-in glob cleanup now routes through `safeRemove`, and Teams background archive, staging, and restore are skipped with a `WARNING` on the same condition
+    - Removals under the console user's home folder now run as the console user (with no `root` fallback), so a symlink swapped in after the parent check cannot redirect the deletion outside what the user can already delete; root-owned folders left in the home folder are not removed and log a `WARNING`
+    - The parent-directory symlink check now requires the resolved path to stay under the resolved home folder (case-sensitive), comparing only the portion below the home folder case-insensitively
+    - `reset_teams` / `reset_teams_force` now fail (exit `20`) before removing Teams data when classic backgrounds cannot be archived or current backgrounds cannot be staged, instead of continuing and deleting them; backgrounds under a symlinked parent directory are skipped with a `WARNING` and cleanup continues
+    - Teams background archive and restore moves no longer follow a destination symlink, and restore keeps backgrounds in staging with a `WARNING` when the destination already exists
+    - Custom MAU channels now require an `https://` `ManifestServer`; non-HTTPS values are ignored with a `WARNING`
+    - An unreadable app version no longer triggers the legacy Office 2016 installer or version-based reinstalls (Office apps, OneDrive, Teams, and MAU); the code-signature check decides
+    - User-context commands (restart prompt, `open`, `tccutil`, keychain, `defaults`) run once in the console user's session instead of re-running under plain `sudo -u` after a non-zero exit
+    - Keychain deletions no longer copy `security` output (including the deleted item's account and identity attributes) into the client log; each deletion logs a sanitized `INFO` line naming only the item label, service, or creator, and unexpected failures log a `WARNING`
+    - `reset_excel` deletes the `Microsoft.Office.Excel.ProtectedDataServices` certificate in the console user's session instead of searching root's keychains
+    - Every run that reaches preflight now ends with a `NOTICE` summary line in all modes (including `silent`, which has no completion dialog): succeeded and failed operation counts, failed operation IDs, elapsed time, and exit code (for example, `Exiting: 9 succeeded, 1 failed (reset_teams); Elapsed Time: 0h:1m:12s; exit code 20`)
+    - Teams background restore creates container folders as the console user (MOFA-aligned) instead of leaving root-owned parents
+    - swiftDialog trust check now verifies the code signature against a Team ID requirement, checks ownership of `Contents/` and `Contents/MacOS/`, and exits `10` if the version is still unreadable after reinstall
+    - swiftDialog install stages `Dialog.pkg` in the root-private run directory, requires a passing Gatekeeper assessment, and verifies regular-file type and root ownership before `installer` runs
+    - Preflight exits `10` when the console user's home resolves to `/`, `/var/root`, a relative path, or a missing folder; home paths containing spaces are no longer truncated
+    - Microsoft package staging is removed on every failure path, so Teams download retries no longer retain failed downloads until exit
+    - Treat `_mbsetupuser` (Setup Assistant) as no console user
+    - Intro dialog now tells users to save their work before continuing
+    - `README.md` now leads with a destructive-script caution, adds an impact column to the operations table, and clarifies that `test` is not a dry-run and `silent` skips confirmation
+- Reviewed [MOFA](https://github.com/cocopuff2u/MOFA) repo
+- Hardened root path trust based on a Monocle security review
+    - Microsoft repair packages now download into a root-private per-run staging directory instead of `/Users/Shared/OnDemandInstaller`, and are checked for regular-file and root ownership before `installer` runs
+    - swiftDialog command file stays root-owned and world-readable; it is no longer `chown`ed to the console user
+    - swiftDialog must resolve inside `/Library/Application Support/Dialog/Dialog.app`, be root-owned and not group/other-writable, and be signed by Team ID `PWA5E9TQ59`; one reinstall is attempted before exiting `10`
+    - Removed `/usr/local/bin` from `PATH`; all swiftDialog invocations use the validated absolute path
+    - `reset_teams` / `reset_teams_force` stage Teams backgrounds in a private `mktemp -d` directory instead of a fixed `/tmp` path, and retain them with a warning if restore fails
+- Added `remove_defender` to the interactive destructive-action confirmation, and log an `INFO` line when the user acknowledges it
+- `debug` mode uses a timestamped `PS4` and suspends xtrace inside keychain-deletion, Microsoft package-install, and swiftDialog-install helpers
+- Internal
+    - `Resources/createSelfExtracting.zsh` now generates wrappers that pin `PATH`, extract into a private `mktemp -d` directory, run the extracted script with `/bin/zsh --no-rcs`, forward `"$@"`, preserve the exit code, and clean up, and restricts `--target` to inert filename characters (rejecting `.` and `..`)
+    - Untracked the stale generated self-extracting wrapper and ignored `Resources/*_self-extracting-*.sh`
+    - `AGENTS.md` and `.github` agent instructions now codify root path trust guardrails, the `self-service` allowlist gate, exit codes, and expanded release version markers
+    - Removed the superseded standalone `Resources/Adobe Acrobat Add-in Removal for Microsoft 365 (1.0.2).zsh`; use the `remove_acrobat_addin` operation instead
+    - `scripts/mofa-consult.zsh` removed `/usr/local/bin` from `PATH` and synced `remove_office` and `reset_teams` report notes with `2.0.0` behavior
+    - Corrected `.github` release-preparation and maintainer-parity instructions to match `AGENTS.md` exit-code expectations and current `scripts/mofa-consult.zsh` behavior; `VERSION.txt` is documented as a local, gitignored marker
+    - Refreshed pinned GitHub Actions SHAs in `.github/workflows/security-scan.yml`: `actions/checkout` `v7.0.1`, `github/codeql-action/upload-sarif` `v4.38.2`, and `gitleaks/gitleaks-action` `v3.0.0` (Node 24 runtime; Node 20 is removed from GitHub-hosted runners)
+
 ### Version 1.4.0 (02-Sep-2026)
 - Reviewed [MOFA](https://github.com/cocopuff2u/MOFA) repo
 - Added an admin-configurable silent-mode force-quit skip list `silentSkipForceQuitOps` (Feature Request #20)
