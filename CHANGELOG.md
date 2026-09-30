@@ -29,6 +29,7 @@
 - Internal
     - `Resources/createSelfExtracting.zsh` now generates wrappers that extract into a private `mktemp -d` directory, forward `"$@"`, preserve the exit code, and clean up, and restricts `--target` to inert filename characters
     - Untracked the stale generated self-extracting wrapper and ignored `Resources/*_self-extracting-*.sh`
+    - `AGENTS.md` and `.github` agent instructions now codify root path trust guardrails, the `self-service` allowlist gate, exit codes, and expanded release version markers
 
 ### Version 1.4.0 (02-Sep-2026)
 - Reviewed [MOFA](https://github.com/cocopuff2u/MOFA) repo

@@ -37,7 +37,8 @@ Invoke relevant skill name during planning.
 3. Implement only in the smallest owning surface.
 4. Run required `zsh -n` checks immediately after the edit.
 5. Validate `self-service` and `silent` assumptions before considering adjacent cleanup.
-6. Update `README.md` and `CHANGELOG.md` when the behavior is user-visible.
+6. Preserve the `self-service` allowlist gate, destructive confirmation, root path trust helpers, and exit codes `0`, `2`, `10`, and `20`.
+7. Update `README.md` and `CHANGELOG.md` when the behavior is user-visible.
 
 ### Maintainer Reporting / Parity Skill
 
@@ -49,11 +50,12 @@ Invoke relevant skill name during planning.
 
 ### Release Preparation Skill
 
-1. Keep `scriptVersion`, `VERSION.txt`, and the top `CHANGELOG.md` entry aligned.
-2. Update only files explicitly in release scope.
-3. Run syntax checks on every modified Zsh file.
-4. Validate both `self-service` and `silent` expectations before release.
-5. Do not rebuild or commit generated self-extracting wrappers unless the task explicitly requires it.
+1. Keep `scriptVersion`, `VERSION.txt`, and the top `CHANGELOG.md` entry aligned, plus the script `HISTORY` header, `README.md` title, and `SECURITY.md` supported version.
+2. When promoting a beta (for example `2.0.0b2`) to final (`2.0.0`), fold beta `CHANGELOG.md` entries into the final entry; call out breaking changes with the `:warning: **Breaking Change:** :warning:` pattern.
+3. Update only files explicitly in release scope.
+4. Run syntax checks on every modified Zsh file.
+5. Validate both `self-service` and `silent` expectations before release.
+6. Do not rebuild or commit generated self-extracting wrappers unless the task explicitly requires it.
 
 ## Boundaries
 
@@ -65,6 +67,7 @@ Invoke relevant skill name during planning.
 
 **Never do**
 - Commit generated `*_self-extracting-*.sh` wrappers unless explicitly asked.
+- Weaken root path trust (pinned `PATH`, validated swiftDialog, private staging) or the `self-service` allowlist gate without explicit approval.
 
 ## Source of Truth
 
@@ -109,7 +112,7 @@ Out of scope:
 - For maintainer-only reporting changes, prefer warning-and-skip behavior over aborting when optional local reference artifacts are missing.
 - Keep naming, formatting, and copy consistent with existing script patterns.
 - Check `git status` before editing shared docs or assets so unrelated local work is not overwritten.
-- Treat generated `*_self-extracting-*.sh` wrappers as build artifacts and leave them untracked unless the user explicitly asks to commit one.
+- Treat generated `*_self-extracting-*.sh` wrappers as build artifacts; they are ignored via `Resources/*_self-extracting-*.sh` in `.gitignore` and stay untracked unless the user explicitly asks to commit one.
 - Do not add new production dependencies without explicit approval.
 
 ## Scripting Style
@@ -125,11 +128,34 @@ These rules override ad-hoc prompting. Match established `Microsoft-365-Reset.zs
 7. Keep log format consistent: `<script name> (<version>): <timestamp>  [LEVEL] <message>`.
 8. Keep elapsed-time format consistent: `Elapsed Time: %dh:%dm:%ds`.
 9. Keep dialog conventions consistent: use global `fontSize` via `--messagefont "size=${fontSize}"`, keep warning emphasis readable and intentional, and keep selection UI behavior consistent with current picker flow.
+10. Preserve the hard-coded client log path `/var/log/org.churchofjesuschrist.log` unless explicitly requested otherwise.
+
+## Root Path Trust
+
+Script runs as root; keep these guardrails intact in `Microsoft-365-Reset.zsh` and `scripts/mofa-consult.zsh`.
+
+- Keep `PATH` pinned to `/usr/bin:/bin:/usr/sbin:/sbin`; do not re-add `/usr/local/bin`.
+- Invoke swiftDialog only through validated `"${dialogBinary}"` set by `dialogTrustCheck` (root-owned, not group/other-writable, Team ID `PWA5E9TQ59`), never bare `dialog`.
+- Stage downloads and temporary files in root-private `mktemp -d` directories (for example under `"${workDirectory}"`), never fixed `/tmp`, `/Users/Shared`, or other user-writable paths.
+- Verify regular-file type and root ownership before passing staged packages to `installer`.
+- Keep swiftDialog command file root-owned; do not `chown` it to the console user.
+- Run console-user commands through `runAsUser` (once, in the user's session); no retry fallbacks under plain `sudo -u`.
+- Remove paths through `safeRemove` instead of bare `rm -rf`.
+- Add `setopt localoptions noxtrace` to helpers handling keychain items, package installs, or other sensitive data so `debug` traces stay safe.
+- Remove damaged or version-mismatched apps only after replacement package downloads and passes verification.
 ## Mode Expectations
 
-- `self-service` is the primary guided user flow.
-- `silent` is the primary automation flow and must not depend on dialog UI.
-- `test` and `debug` are maintainer-facing modes and must not redefine production semantics by accident.
+- `self-service` is the primary guided user flow; empty `--operations` / `$5` allowlist exits `10` during preflight unless `--allow-all-operations` / `$6` is `true`.
+- `silent` is the primary automation flow, must not depend on dialog UI, and runs listed operations with no destructive confirmation.
+- `test` and `debug` are maintainer-facing modes and must not redefine production semantics by accident; empty allowlist only logs a `WARNING`. `test` is not a dry run.
+- Keep destructive operations (`remove_office`, `remove_outlook_data`, `remove_onenote_data`, `remove_defender`) behind interactive destructive-action confirmation.
+
+## Exit Codes
+
+- `0`: success, including intentional user cancellation in interactive modes
+- `2`: no operations in `silent` mode, or destructive confirmation not acknowledged
+- `10`: preflight / validation failure, including empty `self-service` allowlist without `--allow-all-operations` / `$6`
+- `20`: one or more operations failed
 
 ## Quality Bar
 
@@ -138,6 +164,7 @@ These rules override ad-hoc prompting. Match established `Microsoft-365-Reset.zs
 - Preserve operator and end-user clarity in dialog copy and warnings.
 - Let optional maintainer reference artifacts degrade with warning-and-skip behavior rather than unnecessary aborts.
 - Avoid regressions in MOFA parity handling, package-era comparison coverage, and exit-code predictability.
+- Avoid regressions in root path trust guardrails and the `self-service` allowlist gate.
 
 ## Required Validation
 
@@ -154,8 +181,8 @@ These rules override ad-hoc prompting. Match established `Microsoft-365-Reset.zs
 
 Apply only for release prep.
 
-1. Keep `scriptVersion` and `VERSION.txt` aligned.
-2. Validate `self-service` and `silent` assumptions end-to-end.
+1. Keep `scriptVersion` and `VERSION.txt` aligned, plus script `HISTORY` header, `README.md` title, and `SECURITY.md` supported version.
+2. Validate `self-service` and `silent` assumptions end-to-end, including allowlist gate and exit codes.
 3. Leave generated self-extracting wrappers untracked unless packaging refresh is explicitly requested.
 
 
