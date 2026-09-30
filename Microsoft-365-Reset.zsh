@@ -343,15 +343,28 @@ function pathHasTrustedParents() {
     local targetPath="$1"
     local homePath="${loggedInUserHome:-}"
     local parentPath="${targetPath:h}"
+    local canonicalHome
+    local canonicalParent
     local expectedPath
 
     if [[ -z "${homePath}" || "${homePath}" == "/" || "${targetPath}" != "${homePath}/"* ]]; then
         return 0
     fi
 
-    # Case-insensitive: realpath returns on-disk case (for example, "Powerpoint" resolves to "PowerPoint")
-    expectedPath="${homePath:A}${parentPath#"${homePath}"}"
-    [[ "${(L)parentPath:A}" == "${(L)expectedPath}" ]]
+    canonicalHome="${homePath:A}"
+    canonicalParent="${parentPath:A}"
+
+    # Canonical parent must stay under the canonical home (case-sensitive prefix)
+    [[ "${canonicalParent}" == "${canonicalHome}" || "${canonicalParent}" == "${canonicalHome}/"* ]] || return 1
+
+    # Below home, case-insensitive: realpath returns on-disk case (for example, "Powerpoint" resolves to "PowerPoint")
+    expectedPath="${canonicalHome}${parentPath#"${homePath}"}"
+    [[ "${(L)canonicalParent}" == "${(L)expectedPath}" ]]
+}
+
+function pathIsUnderUserHome() {
+    local targetPath="$1"
+    [[ -n "${loggedInUser}" && -n "${loggedInUserHome}" && "${loggedInUserHome}" != "/" && "${targetPath}" == "${loggedInUserHome}/"* ]]
 }
 
 function safeRemove() {
@@ -367,8 +380,14 @@ function safeRemove() {
             warning "safeRemove refused path with a symlinked parent directory: '${targetPath}'"
             return 1
         fi
-        /bin/rm -rf "${targetPath}" >>"${scriptLog}" 2>&1
-        local rmStatus=$?
+        local rmStatus
+        if pathIsUnderUserHome "${targetPath}"; then
+            # Remove as the console user so a symlink swapped in after the check cannot redirect a root deletion; no root fallback
+            runAsUser "${loggedInUser}" /bin/rm -rf "${targetPath}" >>"${scriptLog}" 2>&1
+        else
+            /bin/rm -rf "${targetPath}" >>"${scriptLog}" 2>&1
+        fi
+        rmStatus=$?
         if [[ ${rmStatus} -ne 0 ]]; then
             warning "Failed to remove path: ${targetPath}"
             return ${rmStatus}
@@ -2189,11 +2208,15 @@ function resetTeamsOperation() {
     elif [[ -d "${classicBackgroundsPath}" ]]; then
         local originalArchivePath="${teamsBackgroundArchive}"
         local archiveCounter=0
-        while [[ -e "${teamsBackgroundArchive}" ]]; do
+        while [[ -e "${teamsBackgroundArchive}" || -L "${teamsBackgroundArchive}" ]]; do
             ((archiveCounter++))
             teamsBackgroundArchive="${originalArchivePath}${archiveCounter}"
         done
-        /bin/mv "${classicBackgroundsPath}" "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1
+        # -h: never follow a destination symlink planted after the name check
+        if ! /bin/mv -h "${classicBackgroundsPath}" "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1; then
+            errorOut "Unable to archive classic Teams backgrounds; skipping Teams reset to preserve them"
+            return 1
+        fi
         /usr/sbin/chown -R "${loggedInUser}" "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1
         if [[ "${operationMode}" != "silent" ]]; then
             runAsUser "${loggedInUser}" /usr/bin/open "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1
@@ -2208,10 +2231,13 @@ function resetTeamsOperation() {
         if [[ -n "${modernBackgroundsStagingRoot}" && -d "${modernBackgroundsStagingRoot}" ]]; then
             modernBackgroundsStaging="${modernBackgroundsStagingRoot}/Backgrounds"
             if ! /bin/mv "${modernBackgroundsPath}" "${modernBackgroundsStaging}" >>"${scriptLog}" 2>&1; then
-                warning "Unable to stage Teams backgrounds; they may be removed with Teams container data"
+                errorOut "Unable to stage Teams backgrounds; skipping Teams reset to preserve them"
+                /bin/rmdir "${modernBackgroundsStagingRoot}" 2>/dev/null
+                return 1
             fi
         else
-            warning "Unable to create private Teams background staging directory; backgrounds may be removed with Teams container data"
+            errorOut "Unable to create private Teams background staging directory; skipping Teams reset to preserve backgrounds"
+            return 1
         fi
     fi
 
@@ -2279,7 +2305,9 @@ function resetTeamsOperation() {
         runAsUser "${loggedInUser}" /bin/mkdir -p "$(dirname "${modernBackgroundsPath}")" >>"${scriptLog}" 2>&1
         if ! pathHasTrustedParents "${modernBackgroundsPath}"; then
             warning "Unable to restore Teams backgrounds; a parent directory resolves through a symlink; retained at ${modernBackgroundsStaging}"
-        elif /bin/mv "${modernBackgroundsStaging}" "${modernBackgroundsPath}" >>"${scriptLog}" 2>&1; then
+        elif [[ -e "${modernBackgroundsPath}" || -L "${modernBackgroundsPath}" ]]; then
+            warning "Unable to restore Teams backgrounds; destination already exists; retained at ${modernBackgroundsStaging}"
+        elif /bin/mv -h "${modernBackgroundsStaging}" "${modernBackgroundsPath}" >>"${scriptLog}" 2>&1; then
             /usr/sbin/chown -R "${loggedInUser}" "$(dirname "${modernBackgroundsPath}")" >>"${scriptLog}" 2>&1
         else
             warning "Unable to restore Teams backgrounds; retained at ${modernBackgroundsStaging}"

@@ -48,7 +48,7 @@ The script consolidates expanded package workflows into one root-run tool with:
 Intentional divergences from current MOFA behavior:
 
 - `reset_factory` directly performs MOFA-aligned suite cleanup and intentionally adds package-era dependency expansion
-- `reset_teams` suppresses Screen Recording settings in `silent` mode, preserves classic and work-or-school Teams bundles during a standard reset, and does not install current Teams when its main app bundle is absent
+- `reset_teams` suppresses Screen Recording settings in `silent` mode, preserves classic and work-or-school Teams bundles during a standard reset, and does not install current Teams when its main app bundle is absent, and stops before cleanup when Teams backgrounds cannot be archived or staged
 - AutoUpdate registration treats new Teams as the current `TEAMS21` product while keeping classic Teams on the legacy product ID
 
 Repo-local operations without current MOFA community-script equivalents:
@@ -379,6 +379,8 @@ zsh -n ./Microsoft-365-Reset.zsh
 - Reset operations force-quit Microsoft apps; ask users to save their work first, especially for `silent` runs.
 - `reset_credentials` and `reset_factory` delete keychain sign-in items; users must sign in again.
 - Removals under the console user's home folder are refused when a parent directory resolves through a symlink, so a user-planted link cannot redirect a root deletion outside the home folder; refusals are logged as `WARNING` lines.
+- Removals under the console user's home folder run as the console user, not root; root-owned folders left in the home folder (for example, by older tools) are not removed and are logged as `WARNING` lines.
+- `reset_teams` / `reset_teams_force` fail (exit `20`) before removing any Teams data when Teams backgrounds cannot be archived or staged, so a failed preservation step never deletes them.
 - Constrain each Self Service policy with `--operations` / `$5`. Reserve `--allow-all-operations` / `$6` for admin-only policies, and exclude `remove_defender` unless your security team approves.
 - `test` mode is not a dry run.
 - Recovery: apps can be reinstalled, and MAU, Teams, and OneDrive state rebuilds itself; deleted local mail, unsynced OneNote content, keychain items, removed Defender, and deleted logs cannot be recovered without backups or reinstallation.
