@@ -5,7 +5,6 @@
 # mofa-consult
 #
 # Maintainer helper to sync a sibling MOFA checkout and report possible inclusions for this repo.
-# - `scripts/mofa-consult.zsh` bumped to `2.0.0`, removed `/usr/local/bin` from `PATH`, and synced `remove_office` and `reset_teams` report notes with the MOFA-aligned `2.0.0` behavior
 #
 ####################################################################################################
 

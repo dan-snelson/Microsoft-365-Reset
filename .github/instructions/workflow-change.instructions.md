@@ -6,7 +6,7 @@ applyTo: "Microsoft-365-Reset.zsh"
 
 # Workflow Change
 
-**Priority Order**: 1. MOFA Baseline → 2. Smallest Owning Surface → 3. Silent Safety → 4. Deterministic Ordering
+**Priority Order**: 1. Silent Safety → 2. Deterministic Ordering → 3. MOFA Baseline → 4. Smallest Owning Surface
 
 **Conflict Resolution Rule**: When priorities conflict, resolve in the order listed above. For example, if MOFA conflicts with Silent Safety, prioritize Silent Safety. If Smallest Owning Surface conflicts with Deterministic Ordering, prioritize Deterministic Ordering.
 
@@ -20,7 +20,7 @@ applyTo: "Microsoft-365-Reset.zsh"
 ## 2. Workflow Safety Rules
 
 - Preserve deterministic execution ordering and dependency resolution.
-- Keep `self-service` and `silent` aligned on operation ordering, dependency handling, and exit behavior.
+- Keep `self-service` and `silent` aligned on operation ordering and dependency handling; exit codes follow the intentional mode differences in `AGENTS.md` (`silent` exits `2` with no operations, `self-service` exits `10` with an empty allowlist unless opted in).
 - Never let UI-only behavior leak into `silent`.
 - Avoid hidden behavior changes during refactors.
 - Keep the `self-service` allowlist gate intact: an empty `--operations` / `$5` exits `10` during preflight unless `--allow-all-operations` / `$6` is set; `test` and `debug` only log a `WARNING`.

@@ -331,6 +331,22 @@ function runAsUser() {
     /usr/bin/sudo -u "${user}" "$@"
 }
 
+function pathHasTrustedParents() {
+    # Under the console user's home, parent directories must not resolve through a user-planted symlink (root follows them)
+    local targetPath="$1"
+    local homePath="${loggedInUserHome:-}"
+    local parentPath="${targetPath:h}"
+    local expectedPath
+
+    if [[ -z "${homePath}" || "${homePath}" == "/" || "${targetPath}" != "${homePath}/"* ]]; then
+        return 0
+    fi
+
+    # Case-insensitive: realpath returns on-disk case (for example, "Powerpoint" resolves to "PowerPoint")
+    expectedPath="${homePath:A}${parentPath#"${homePath}"}"
+    [[ "${(L)parentPath:A}" == "${(L)expectedPath}" ]]
+}
+
 function safeRemove() {
     local targetPath="$1"
 
@@ -340,6 +356,10 @@ function safeRemove() {
     fi
 
     if [[ -e "${targetPath}" || -L "${targetPath}" ]]; then
+        if ! pathHasTrustedParents "${targetPath}"; then
+            warning "safeRemove refused path with a symlinked parent directory: '${targetPath}'"
+            return 1
+        fi
         /bin/rm -rf "${targetPath}" >>"${scriptLog}" 2>&1
         local rmStatus=$?
         if [[ ${rmStatus} -ne 0 ]]; then
@@ -348,6 +368,15 @@ function safeRemove() {
         fi
     fi
 
+    return 0
+}
+
+function safeRemoveMatches() {
+    # Remove each expanded glob match through safeRemove; callers pass (N) globs so no match is a no-op
+    local matchPath
+    for matchPath in "$@"; do
+        safeRemove "${matchPath}"
+    done
     return 0
 }
 
@@ -1404,7 +1433,7 @@ function removeOfficePreinstall() {
     safeRemove "/Applications/Microsoft Teams.app"
     safeRemove "/Applications/Microsoft Teams classic.app"
     safeRemove "/Applications/Microsoft Teams (work or school).app"
-    rm -rf /Applications/CodeSignSummary-*.md >>"${scriptLog}" 2>&1
+    safeRemoveMatches /Applications/CodeSignSummary-*.md(N)
 
     safeRemove "/Library/Application Support/Microsoft/MAU2.0"
     safeRemove "/Library/Application Support/Microsoft/MERP2.0"
@@ -1688,7 +1717,7 @@ function cleanupOfficeCommonGroupContainers() {
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/FontCache"
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/ComRPC32"
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/TemporaryItems"
-    rm -f "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office"/Microsoft\ Office\ ACL* >>"${scriptLog}" 2>&1
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office"/Microsoft\ Office\ ACL*(N)
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/MicrosoftRegistrationDB.reg"
 }
 
@@ -1721,14 +1750,14 @@ function op_reset_word() {
     safeRemove "/Applications/.Microsoft Word.app.installBackup"
 
     safeRemove "/Library/Application Support/Microsoft/Office365/User Content.localized/Startup.localized/Word"
-    rm -rf "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.dot >>"${scriptLog}" 2>&1
-    rm -rf "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.dotx >>"${scriptLog}" 2>&1
-    rm -rf "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.dotm >>"${scriptLog}" 2>&1
+    safeRemoveMatches "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.dot(N)
+    safeRemoveMatches "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.dotx(N)
+    safeRemoveMatches "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.dotm(N)
 
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Startup.localized/Word"
-    rm -rf "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.dot >>"${scriptLog}" 2>&1
-    rm -rf "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.dotx >>"${scriptLog}" 2>&1
-    rm -rf "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.dotm >>"${scriptLog}" 2>&1
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.dot(N)
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.dotx(N)
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.dotm(N)
 
     cleanupOfficeCommonGroupContainers
 
@@ -1765,14 +1794,14 @@ function op_reset_excel() {
     safeRemove "/Applications/.Microsoft Excel.app.installBackup"
 
     safeRemove "/Library/Application Support/Microsoft/Office365/User Content.localized/Startup.localized/Excel"
-    rm -rf "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.xlt >>"${scriptLog}" 2>&1
-    rm -rf "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.xltx >>"${scriptLog}" 2>&1
-    rm -rf "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.xltm >>"${scriptLog}" 2>&1
+    safeRemoveMatches "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.xlt(N)
+    safeRemoveMatches "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.xltx(N)
+    safeRemoveMatches "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.xltm(N)
 
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Startup.localized/Excel"
-    rm -rf "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.xlt >>"${scriptLog}" 2>&1
-    rm -rf "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.xltx >>"${scriptLog}" 2>&1
-    rm -rf "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.xltm >>"${scriptLog}" 2>&1
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.xlt(N)
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.xltx(N)
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.xltm(N)
 
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/mip_policy"
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/ComRPC32"
@@ -1814,17 +1843,17 @@ function op_reset_powerpoint() {
     safeRemove "/Applications/.Microsoft PowerPoint.app.installBackup"
 
     safeRemove "/Library/Application Support/Microsoft/Office365/User Content.localized/Startup.localized/PowerPoint"
-    rm -rf "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.pot >>"${scriptLog}" 2>&1
-    rm -rf "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.potx >>"${scriptLog}" 2>&1
-    rm -rf "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.potm >>"${scriptLog}" 2>&1
+    safeRemoveMatches "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.pot(N)
+    safeRemoveMatches "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.potx(N)
+    safeRemoveMatches "/Library/Application Support/Microsoft/Office365/User Content.localized/Templates.localized"/*.potm(N)
 
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Startup.localized/PowerPoint"
-    rm -rf "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.pot >>"${scriptLog}" 2>&1
-    rm -rf "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.potx >>"${scriptLog}" 2>&1
-    rm -rf "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.potm >>"${scriptLog}" 2>&1
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.pot(N)
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.potx(N)
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Templates.localized"/*.potm(N)
 
-    rm -rf "/Library/Application Support/Microsoft/Office365/User Content.localized/Add-Ins"/*.ppam >>"${scriptLog}" 2>&1
-    rm -rf "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Add-Ins"/*.ppam >>"${scriptLog}" 2>&1
+    safeRemoveMatches "/Library/Application Support/Microsoft/Office365/User Content.localized/Add-Ins"/*.ppam(N)
+    safeRemoveMatches "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Add-Ins"/*.ppam(N)
     safeRemove "/Library/Application Support/Microsoft/Office365/User Content.localized/Themes"
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Themes"
 
@@ -1975,14 +2004,14 @@ function op_reset_onedrive() {
     if [[ -d "/Applications/OneDrive.app" ]]; then
         local oneDriveVersion
         oneDriveVersion="$(defaults read /Applications/OneDrive.app/Contents/Info.plist CFBundleVersion 2>/dev/null)"
-        if ! is-at-least 23154.0 "${oneDriveVersion}" && is-at-least 10.15 "${osVersion}"; then
+        if [[ -n "${oneDriveVersion}" ]] && ! is-at-least 23154.0 "${oneDriveVersion}" && is-at-least 10.15 "${osVersion}"; then
             repairFromMicrosoftPkg "Microsoft OneDrive" "https://go.microsoft.com/fwlink/?linkid=861011" "" || return 1
         fi
 
         /usr/bin/codesign -vv --deep /Applications/OneDrive.app >>"${scriptLog}" 2>&1
         if [[ $? -ne 0 ]]; then
-            safeRemove "/Applications/OneDrive.app"
-            repairFromMicrosoftPkg "Microsoft OneDrive" "https://go.microsoft.com/fwlink/?linkid=861011" "" || return 1
+            warning "Microsoft OneDrive app bundle damaged; replacing after package verification"
+            repairFromMicrosoftPkg "Microsoft OneDrive" "https://go.microsoft.com/fwlink/?linkid=861011" "" "/Applications/OneDrive.app" || return 1
         fi
     fi
 
@@ -2094,6 +2123,8 @@ function resetTeamsOperation() {
     local installAttempt=1
     local installationRetries=5
     local shouldInstallTeams="${forceReinstall}"
+    local teamsInstalled="false"
+    local teamsReplacePath=""    # removed only after the replacement package downloads and verifies
     osVersion="$(sw_vers -productVersion)"
 
     pkill -9 'MSTeams' 2>/dev/null
@@ -2109,12 +2140,12 @@ function resetTeamsOperation() {
         currentTeamsVersion="$(defaults read "${teamsAppPath}/Contents/Info.plist" CFBundleVersion 2>/dev/null)"
         info "Found Microsoft Teams version ${currentTeamsVersion}"
         if [[ "${forceReinstall}" == "true" ]]; then
-            info "Force reinstall requested for Microsoft Teams; removing existing app bundle"
-            safeRemove "${teamsAppPath}"
+            info "Force reinstall requested for Microsoft Teams; replacing existing app bundle after package verification"
+            teamsReplacePath="${teamsAppPath}"
             shouldInstallTeams="true"
-        elif ! is-at-least 23247.0 "${currentTeamsVersion}" && is-at-least 10.15 "${osVersion}"; then
-            info "Installed Microsoft Teams is below MOFA minimum; removing for reinstall"
-            safeRemove "${teamsAppPath}"
+        elif [[ -n "${currentTeamsVersion}" ]] && ! is-at-least 23247.0 "${currentTeamsVersion}" && is-at-least 10.15 "${osVersion}"; then
+            info "Installed Microsoft Teams is below MOFA minimum; replacing after package verification"
+            teamsReplacePath="${teamsAppPath}"
             shouldInstallTeams="true"
         fi
     fi
@@ -2131,7 +2162,9 @@ function resetTeamsOperation() {
         shouldInstallTeams="true"
     fi
 
-    if [[ -d "${classicBackgroundsPath}" ]]; then
+    if [[ -d "${classicBackgroundsPath}" ]] && ! pathHasTrustedParents "${classicBackgroundsPath}"; then
+        warning "Skipping classic Teams background archive; a parent directory resolves through a symlink: ${classicBackgroundsPath}"
+    elif [[ -d "${classicBackgroundsPath}" ]]; then
         local originalArchivePath="${teamsBackgroundArchive}"
         local archiveCounter=0
         while [[ -e "${teamsBackgroundArchive}" ]]; do
@@ -2145,7 +2178,9 @@ function resetTeamsOperation() {
         fi
     fi
 
-    if [[ -d "${modernBackgroundsPath}" ]]; then
+    if [[ -d "${modernBackgroundsPath}" ]] && ! pathHasTrustedParents "${modernBackgroundsPath}"; then
+        warning "Skipping Teams background staging; a parent directory resolves through a symlink: ${modernBackgroundsPath}"
+    elif [[ -d "${modernBackgroundsPath}" ]]; then
         # Root-private staging outside workDirectory so backgrounds survive a failed restore
         modernBackgroundsStagingRoot="$(mktemp -d "/private/tmp/${scriptName}_Teams_Backgrounds.XXXXXX")"
         if [[ -n "${modernBackgroundsStagingRoot}" && -d "${modernBackgroundsStagingRoot}" ]]; then
@@ -2220,7 +2255,9 @@ function resetTeamsOperation() {
     if [[ -n "${modernBackgroundsStaging}" && -d "${modernBackgroundsStaging}" && ! -L "${modernBackgroundsStaging}" ]]; then
         # Create the container path as the user (MOFA-aligned) so parents are not left root-owned
         runAsUser "${loggedInUser}" /bin/mkdir -p "$(dirname "${modernBackgroundsPath}")" >>"${scriptLog}" 2>&1
-        if /bin/mv "${modernBackgroundsStaging}" "${modernBackgroundsPath}" >>"${scriptLog}" 2>&1; then
+        if ! pathHasTrustedParents "${modernBackgroundsPath}"; then
+            warning "Unable to restore Teams backgrounds; a parent directory resolves through a symlink; retained at ${modernBackgroundsStaging}"
+        elif /bin/mv "${modernBackgroundsStaging}" "${modernBackgroundsPath}" >>"${scriptLog}" 2>&1; then
             /usr/sbin/chown -R "${loggedInUser}" "$(dirname "${modernBackgroundsPath}")" >>"${scriptLog}" 2>&1
         else
             warning "Unable to restore Teams backgrounds; retained at ${modernBackgroundsStaging}"
@@ -2230,33 +2267,37 @@ function resetTeamsOperation() {
         /bin/rmdir "${modernBackgroundsStagingRoot}" 2>/dev/null
     fi
 
-    if [[ -d "${teamsAppPath}" ]]; then
+    if [[ -d "${teamsAppPath}" && -z "${teamsReplacePath}" ]]; then
         /usr/bin/codesign -vv --deep "${teamsAppPath}" >>"${scriptLog}" 2>&1
         if [[ $? -ne 0 ]]; then
-            warning "Microsoft Teams app bundle damaged; reinstalling"
-            safeRemove "${teamsAppPath}"
+            warning "Microsoft Teams app bundle damaged; replacing after package verification"
+            teamsReplacePath="${teamsAppPath}"
             shouldInstallTeams="true"
         else
             info "Microsoft Teams codesign verification passed"
         fi
     fi
 
-    while [[ "${shouldInstallTeams}" == "true" && ! -d "${teamsAppPath}" && ${installAttempt} -le ${installationRetries} ]]; do
+    while [[ "${shouldInstallTeams}" == "true" && ${installAttempt} -le ${installationRetries} ]]; do
         info "Installing Microsoft Teams (attempt ${installAttempt}/${installationRetries})"
-        repairFromMicrosoftPkg "Microsoft Teams" "${teamsPkgURL}" "" || return 1
-        /usr/bin/codesign -vv --deep "${teamsAppPath}" >>"${scriptLog}" 2>&1
-        if [[ $? -eq 0 ]]; then
-            local installedTeamsVersion
-            installedTeamsVersion="$(defaults read "${teamsAppPath}/Contents/Info.plist" CFBundleVersion 2>/dev/null)"
-            info "Microsoft Teams installed successfully at version ${installedTeamsVersion}"
-            break
+        if repairFromMicrosoftPkg "Microsoft Teams" "${teamsPkgURL}" "" "${teamsReplacePath}"; then
+            /usr/bin/codesign -vv --deep "${teamsAppPath}" >>"${scriptLog}" 2>&1
+            if [[ $? -eq 0 ]]; then
+                local installedTeamsVersion
+                installedTeamsVersion="$(defaults read "${teamsAppPath}/Contents/Info.plist" CFBundleVersion 2>/dev/null)"
+                info "Microsoft Teams installed successfully at version ${installedTeamsVersion}"
+                teamsInstalled="true"
+                break
+            fi
+            warning "Microsoft Teams app bundle failed codesign after install attempt ${installAttempt}; retrying"
+            teamsReplacePath="${teamsAppPath}"
+        else
+            warning "Microsoft Teams package download or install failed on attempt ${installAttempt}; retrying"
         fi
-        warning "Microsoft Teams app bundle failed codesign after install attempt ${installAttempt}; removing and retrying"
-        safeRemove "${teamsAppPath}"
         ((installAttempt++))
     done
 
-    if [[ "${shouldInstallTeams}" == "true" && ! -d "${teamsAppPath}" ]]; then
+    if [[ "${shouldInstallTeams}" == "true" && "${teamsInstalled}" != "true" ]]; then
         errorOut "Unable to install a valid Microsoft Teams app bundle"
         return 1
     fi
@@ -2342,15 +2383,14 @@ function op_reset_autoupdate() {
     if [[ -d "${mauAppPath}" ]]; then
         local mauVersion
         mauVersion="$(defaults read "${mauAppPath}/Contents/Info.plist" CFBundleVersion 2>/dev/null)"
-        if ! is-at-least 4.49 "${mauVersion}"; then
+        if [[ -n "${mauVersion}" ]] && ! is-at-least 4.49 "${mauVersion}"; then
             info "Microsoft AutoUpdate is below MOFA minimum; repairing"
             repairFromMicrosoftPkg "Microsoft AutoUpdate" "https://go.microsoft.com/fwlink/?linkid=830196" "" || return 1
         fi
         /usr/bin/codesign -vv --deep "${mauAppPath}" >>"${scriptLog}" 2>&1
         if [[ $? -ne 0 ]]; then
-            warning "Microsoft AutoUpdate app bundle damaged; reinstalling"
-            safeRemove "${mauAppPath}"
-            repairFromMicrosoftPkg "Microsoft AutoUpdate" "https://go.microsoft.com/fwlink/?linkid=830196" "" || return 1
+            warning "Microsoft AutoUpdate app bundle damaged; replacing after package verification"
+            repairFromMicrosoftPkg "Microsoft AutoUpdate" "https://go.microsoft.com/fwlink/?linkid=830196" "" "${mauAppPath}" || return 1
         fi
     fi
 

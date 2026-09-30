@@ -13,7 +13,7 @@ applyTo: "scripts/mofa-consult.zsh"
 - Start with `scripts/mofa-consult.zsh` and current MOFA behavior.
 - Treat MOFA as the primary parity baseline at all times.
 - Do not allow package-era behavior to override current MOFA behavior unless explicitly reported in the output.
-- If both MOFA and the optional package-era reference are unavailable, output a clear error message and skip the comparison entirely.
+- If the MOFA checkout or its stable feed is unavailable, exit with a clear error instead of writing a partial report.
 
 ## Secondary Considerations
 
@@ -36,7 +36,7 @@ applyTo: "scripts/mofa-consult.zsh"
 - If parity work also edits `Microsoft-365-Reset.zsh`, run `zsh -n Microsoft-365-Reset.zsh`.
 - Validate maintainer reporting with the optional package-era reference present.
 - Validate maintainer reporting with the optional package-era reference absent.
-- Before using the optional reference, validate that the data is present and not corrupted. If the optional reference data is invalid or corrupted, output a warning and skip the comparison for that reference.
+- When the optional reference is present but lacks an expected package-era choice, report that item as a `Candidate inclusion` rather than skipping it silently.
 
 ## Boundaries
 
@@ -50,10 +50,10 @@ applyTo: "scripts/mofa-consult.zsh"
 - [ ] Package-era behavior did not override MOFA unless explicitly reported.
 - [ ] Optional package-era reference remained optional.
 - [ ] Warning-and-skip behavior remained intact when the reference was missing.
-- [ ] Both-sources-unavailable scenario produces a clear error and skips comparison.
+- [ ] Missing MOFA checkout or feed produces a clear error and no partial report.
 - [ ] Parity gaps and retained package-era logic are worded explicitly and concisely.
 - [ ] `zsh -n scripts/mofa-consult.zsh` ran after helper edits.
 - [ ] Reporting expectations were checked with and without the optional reference.
-- [ ] Invalid or corrupted optional reference data triggers a warning and skips comparison.
+- [ ] Present-but-incomplete optional reference data surfaces as `Candidate inclusion` items.
 
 **Reference**: Follow `AGENTS.md` first, then `scripts/mofa-consult.zsh`, then optional package-era materials for secondary comparison.

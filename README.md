@@ -91,7 +91,7 @@ Important:
 ## Usage
 
 ```bash
-sudo ./Microsoft-365-Reset.zsh [--mode MODE] [--operations CSV]
+sudo ./Microsoft-365-Reset.zsh [--mode MODE] [--operations CSV] [--allow-all-operations]
 ```
 
 ### Arguments
@@ -245,16 +245,24 @@ Repair pipeline includes:
 
 When MAU is on a `Custom` channel, the `ManifestServer` preference must use `https://`; otherwise it is ignored with a `WARNING` and the standard Microsoft download is used.
 
-When an app's version cannot be read, the script does not assume the legacy 2016 generation; the code-signature check decides whether a current-generation reinstall is needed.
+When an app's version cannot be read, the script does not assume the legacy 2016 generation and skips version-based reinstalls; the code-signature check decides whether a reinstall is needed.
+
+Teams reinstalls retry a failed package download up to five times; a damaged or outdated Teams bundle stays in place until a replacement package verifies.
 
 For `reset_word`, `reset_excel`, `reset_powerpoint`, `reset_outlook`, and `reset_onenote`, a run performs repair/reinstall or configuration cleanup, not both. When one of those apps is repaired, cleanup is deferred to a later run. Because `reset_factory` expands to those operations, it inherits the same behavior for those app-specific resets.
 
 ## Examples
 
-Interactive (default):
+Interactive (default `self-service` mode) with an explicit allowlist; without `--operations`, `self-service` exits `10` during preflight:
 
 ```bash
-sudo ./Microsoft-365-Reset.zsh
+sudo ./Microsoft-365-Reset.zsh --operations reset_word,reset_excel,reset_powerpoint
+```
+
+Admin-only interactive run that shows every operation, including `remove_office` and `remove_defender`:
+
+```bash
+sudo ./Microsoft-365-Reset.zsh --allow-all-operations
 ```
 
 Interactive run with chooser limited to Outlook-safe reset operations:
@@ -281,7 +289,7 @@ sudo ./Microsoft-365-Reset.zsh \
   --operations remove_acrobat_addin
 ```
 
-Local dry invocation for parser checks (will fail root preflight by design):
+Local parser check without `sudo` (not a dry run; fails root preflight by design):
 
 ```bash
 ./Microsoft-365-Reset.zsh --mode silent --operations reset_factory
@@ -364,6 +372,7 @@ zsh -n ./Microsoft-365-Reset.zsh
 - `remove_office` deletes `/Library/Logs/Microsoft`, which Defender and Intune also use; expect those local logs to be gone after a full removal.
 - Reset operations force-quit Microsoft apps; ask users to save their work first, especially for `silent` runs.
 - `reset_credentials` and `reset_factory` delete keychain sign-in items; users must sign in again.
+- Removals under the console user's home folder are refused when a parent directory resolves through a symlink, so a user-planted link cannot redirect a root deletion outside the home folder; refusals are logged as `WARNING` lines.
 - Constrain each Self Service policy with `--operations` / `$5`. Reserve `--allow-all-operations` / `$6` for admin-only policies, and exclude `remove_defender` unless your security team approves.
 - `test` mode is not a dry run.
 - Recovery: apps can be reinstalled, and MAU, Teams, and OneDrive state rebuilds itself; deleted local mail, unsynced OneNote content, keychain items, removed Defender, and deleted logs cannot be recovered without backups or reinstallation.

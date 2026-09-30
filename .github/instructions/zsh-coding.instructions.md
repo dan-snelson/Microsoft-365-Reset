@@ -22,7 +22,7 @@ applyTo: "**/*.zsh"
 
 - `self-service` is the primary guided flow.
 - `silent` is the primary automation flow and must not depend on dialog UI.
-- Keep `self-service` and `silent` aligned on operation ordering, dependency handling, and exit behavior.
+- Keep `self-service` and `silent` aligned on operation ordering and dependency handling; exit codes follow the intentional mode differences in `AGENTS.md` (`silent` exits `2` with no operations, `self-service` exits `10` with an empty allowlist unless opted in).
 - Never let UI-only behavior leak into `silent`.
 - `test` and `debug` are maintainer-facing modes and must not accidentally redefine production semantics.
 

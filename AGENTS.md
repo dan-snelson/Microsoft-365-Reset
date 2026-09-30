@@ -76,7 +76,7 @@ When files disagree, prefer:
 1. `Microsoft-365-Reset.zsh` for implemented behavior, exit codes, workflow ordering, and supported modes.
 2. `scripts/mofa-consult.zsh` for MOFA sync, package-era comparison behavior, and optional-reference handling.
 3. `README.md` and `CHANGELOG.md` for documented workflows, examples, and release notes.
-4. `VERSION.txt` for canonical release marker.
+4. `VERSION.txt` for canonical release marker (local and gitignored; `scriptVersion` is the tracked version).
 5. `Resources/Microsoft_Office_Reset_2.0.0b1_expanded/` and its `Distribution` file for package-era reference behavior when available locally.
 
 ## Mission and Scope
@@ -105,7 +105,7 @@ Out of scope:
 - Treat package-era report coverage in `scripts/mofa-consult.zsh` as optional maintainer context when the local expanded package reference is unavailable.
 - `Resources/createSelfExtracting.zsh`: maintainer helper for generating self-extracting wrappers of the main script
 - `README.md` and `CHANGELOG.md`: usage, behavior, and release history
-- `VERSION.txt`: canonical release marker
+- `VERSION.txt`: canonical release marker (local and gitignored; read by the local deploy helper)
 
 - MOFA remains the primary parity baseline; if the package-era reference points at different chooser or dependency behavior, document any retained divergence instead of silently inheriting legacy behavior.
 - `scripts/mofa-consult.zsh` must produce a clean maintainer report whether `Resources/Microsoft_Office_Reset_2.0.0b1_expanded/` is present or absent locally.

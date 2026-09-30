@@ -14,13 +14,12 @@ applyTo: "**/*.{zsh,md,txt}"
 - Treat `Microsoft-365-Reset.zsh` as the primary runtime artifact.
 - Leave generated `Resources/*_self-extracting-*.sh` wrappers untracked (they are ignored in `.gitignore`) unless a packaging refresh is explicitly requested.
 - Do not modify `Resources/` release artifacts, workflow semantics, or CLI defaults during release prep unless the release scope explicitly requires it.
-- If a file outside the allowed extensions (`.zsh`, `.md`, `.txt`) is encountered in the release scope, exclude it from the release and log a warning.
 
 ## 2. Version Alignment
 
-- Keep `scriptVersion` in `Microsoft-365-Reset.zsh`, `VERSION.txt`, and the top entry in `CHANGELOG.md` aligned when preparing a release.
+- Keep `scriptVersion` in `Microsoft-365-Reset.zsh`, the local (gitignored) `VERSION.txt`, and the top entry in `CHANGELOG.md` aligned when preparing a release.
 - Also align the secondary markers: the `HISTORY` header in `Microsoft-365-Reset.zsh`, the `README.md` title, and the supported-version line in `SECURITY.md`.
-- When promoting a beta (for example `2.0.0`) to a final release (for example `2.0.0`), fold the beta `CHANGELOG.md` entries into the final entry instead of leaving stale beta headings on top.
+- When promoting a beta (for example `2.0.0b2`) to a final release (for example `2.0.0`), fold the beta `CHANGELOG.md` entries into the final entry instead of leaving stale beta headings on top.
 - Call out breaking changes with the existing `:warning: **Breaking Change:** :warning:` pattern.
 - If version markers drift, stop release preparation immediately and correct the mismatch before continuing.
 - Update `CHANGELOG.md` only for shipped behavior. Do not document speculative or deferred work.
@@ -40,7 +39,7 @@ applyTo: "**/*.{zsh,md,txt}"
 - Ensure `self-service` and `silent` have identical behavior for:
   - Deterministic operation ordering
   - Dependency handling
-  - Exit behavior
+- Confirm exit behavior matches the intentional mode differences in `AGENTS.md`: `silent` exits `2` with no operations, `self-service` exits `10` with an empty allowlist unless `--allow-all-operations` / `$6` is `true`, and destructive-action confirmation is interactive-only.
 - If release changes touch parity-sensitive behavior, verify that MOFA remains the primary baseline and document any intentional divergence.
 
 ## 5. Failure Handling
@@ -59,6 +58,5 @@ applyTo: "**/*.{zsh,md,txt}"
 - [ ] `zsh -n scripts/mofa-consult.zsh` ran after MOFA helper edits.
 - [ ] `self-service` and `silent` expectations were reviewed together.
 - [ ] Generated self-extracting wrappers were left unchanged unless explicitly requested.
-- [ ] Files outside allowed extensions were excluded with a warning logged.
 
 **Reference**: For all release scope decisions, resolve ambiguity by consulting `AGENTS.md`. If `AGENTS.md` is silent on the matter, defer to the current repo behavior in `Microsoft-365-Reset.zsh`.
