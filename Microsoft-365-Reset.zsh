@@ -312,7 +312,7 @@ function setHomeFolder() {
         if [[ -d "/Users/${targetUser}" ]]; then
             homePath="/Users/${targetUser}"
         else
-            homePath="$(eval echo ~"${targetUser}")"
+            homePath="$(/usr/bin/dscacheutil -q user -a name "${targetUser}" 2>/dev/null | awk -F': ' '/^dir:/{print $2; exit}')"
         fi
     fi
     echo "${homePath}"
@@ -620,62 +620,65 @@ function repairFromMicrosoftPkg() {
         errorOut "Unable to create private package staging directory for ${appName}"
         return 1
     fi
-    chmod 700 "${downloadFolder}" || return 1
-    downloadFolder="${downloadFolder}/"
+    # Remove per-attempt staging on every return path (Teams retries would otherwise retain failed downloads)
+    {
+        chmod 700 "${downloadFolder}" || return 1
+        downloadFolder="${downloadFolder}/"
 
-    if [[ -n "${explicitPkgURL}" ]]; then
-        pkgURL="${explicitPkgURL}"
-    else
-        pkgURL="$(downloadResolvedPkgURL "${downloadURL}")"
-    fi
+        if [[ -n "${explicitPkgURL}" ]]; then
+            pkgURL="${explicitPkgURL}"
+        else
+            pkgURL="$(downloadResolvedPkgURL "${downloadURL}")"
+        fi
 
-    if [[ -z "${pkgURL}" ]]; then
-        errorOut "Unable to resolve download URL for ${appName}"
-        return 1
-    fi
-
-    pkgName="$(basename "${pkgURL}")"
-    pkgPath="${downloadFolder}${pkgName}"
-    expectedSize="$(contentLengthForURL "${pkgURL}")"
-
-    info "Starting package download for ${appName}: ${pkgURL}"
-    /usr/bin/nscurl --download --large-download --location --download-directory "${downloadFolder}" "${pkgURL}" >>"${scriptLog}" 2>&1 || return 1
-
-    if [[ -L "${pkgPath}" || ! -f "${pkgPath}" ]]; then
-        errorOut "Downloaded package missing or not a regular file for ${appName}"
-        return 1
-    fi
-
-    if [[ "$(stat -f '%u' "${pkgPath}" 2>/dev/null)" != "0" ]]; then
-        errorOut "Downloaded package for ${appName} is not root-owned; refusing to install"
-        return 1
-    fi
-
-    if [[ -n "${expectedSize}" ]]; then
-        localSize="$(stat -qf%z "${pkgPath}" 2>/dev/null)"
-        if [[ -n "${localSize}" && "${localSize}" != "${expectedSize}" ]]; then
-            errorOut "Malformed package download for ${appName}; expected ${expectedSize}, got ${localSize}"
+        if [[ -z "${pkgURL}" ]]; then
+            errorOut "Unable to resolve download URL for ${appName}"
             return 1
         fi
-    fi
 
-    if ! verifyMicrosoftPkgSignature "${pkgPath}"; then
-        errorOut "Package signature check failed for ${appName}"
-        return 1
-    fi
+        pkgName="$(basename "${pkgURL}")"
+        pkgPath="${downloadFolder}${pkgName}"
+        expectedSize="$(contentLengthForURL "${pkgURL}")"
 
-    if [[ -n "${removeBeforeInstall}" ]]; then
-        info "Removing existing ${appName} bundle before install: ${removeBeforeInstall}"
-        safeRemove "${removeBeforeInstall}" || return 1
-    fi
+        info "Starting package download for ${appName}: ${pkgURL}"
+        /usr/bin/nscurl --download --large-download --location --download-directory "${downloadFolder}" "${pkgURL}" >>"${scriptLog}" 2>&1 || return 1
 
-    info "Installing package for ${appName}"
-    /usr/sbin/installer -pkg "${pkgPath}" -target / >>"${scriptLog}" 2>&1
-    installRC=$?
+        if [[ -L "${pkgPath}" || ! -f "${pkgPath}" ]]; then
+            errorOut "Downloaded package missing or not a regular file for ${appName}"
+            return 1
+        fi
 
-    safeRemove "${downloadFolder%/}"
+        if [[ "$(stat -f '%u' "${pkgPath}" 2>/dev/null)" != "0" ]]; then
+            errorOut "Downloaded package for ${appName} is not root-owned; refusing to install"
+            return 1
+        fi
 
-    return ${installRC}
+        if [[ -n "${expectedSize}" ]]; then
+            localSize="$(stat -qf%z "${pkgPath}" 2>/dev/null)"
+            if [[ -n "${localSize}" && "${localSize}" != "${expectedSize}" ]]; then
+                errorOut "Malformed package download for ${appName}; expected ${expectedSize}, got ${localSize}"
+                return 1
+            fi
+        fi
+
+        if ! verifyMicrosoftPkgSignature "${pkgPath}"; then
+            errorOut "Package signature check failed for ${appName}"
+            return 1
+        fi
+
+        if [[ -n "${removeBeforeInstall}" ]]; then
+            info "Removing existing ${appName} bundle before install: ${removeBeforeInstall}"
+            safeRemove "${removeBeforeInstall}" || return 1
+        fi
+
+        info "Installing package for ${appName}"
+        /usr/sbin/installer -pkg "${pkgPath}" -target / >>"${scriptLog}" 2>&1
+        installRC=$?
+
+        return ${installRC}
+    } always {
+        safeRemove "${downloadFolder%/}"
+    }
 }
 
 function resolveCustomManifest() {
@@ -809,26 +812,28 @@ function dialogInstall() {
     [[ -n "${dialogURL}" ]] || fatal "Failed to retrieve swiftDialog download URL"
     [[ "${dialogURL}" == https://github.com/* ]] || fatal "Invalid swiftDialog URL: ${dialogURL}"
 
-    tempPkgDir="$(mktemp -d /private/tmp/dialog-install.XXXXXX)"
+    # Root-private staging inside workDirectory; fatal exits are cleaned up by the EXIT trap
+    tempPkgDir="$(mktemp -d "${workDirectory}/dialog-install.XXXXXX")"
+    [[ -n "${tempPkgDir}" && -d "${tempPkgDir}" ]] || fatal "Unable to create private swiftDialog staging directory"
+    chmod 700 "${tempPkgDir}" || fatal "Unable to secure swiftDialog staging directory"
+    local pkgPath="${tempPkgDir}/Dialog.pkg"
 
-    if ! curl -L --silent --fail --connect-timeout 10 --max-time 60 "${dialogURL}" -o "${tempPkgDir}/Dialog.pkg"; then
-        rm -rf "${tempPkgDir}"
-        fatal "Failed to download swiftDialog package"
+    curl -L --silent --fail --connect-timeout 10 --max-time 60 "${dialogURL}" -o "${pkgPath}" \
+        || fatal "Failed to download swiftDialog package"
+
+    if [[ -L "${pkgPath}" || ! -f "${pkgPath}" || "$(stat -f '%u' "${pkgPath}" 2>/dev/null)" != "0" ]]; then
+        fatal "Downloaded swiftDialog package missing, not a regular file, or not root-owned; refusing to install"
     fi
 
+    local spctlOutput
     local teamID
-    teamID="$(spctl -a -vv -t install "${tempPkgDir}/Dialog.pkg" 2>&1 | awk -F'[()]' '/origin=/{print $2}' | tr -d ' ')"
-    if [[ "${teamID}" != "${swiftDialogTeamID}" ]]; then
-        rm -rf "${tempPkgDir}"
-        fatal "swiftDialog package team ID mismatch: ${teamID}"
-    fi
+    spctlOutput="$(spctl -a -vv -t install "${pkgPath}" 2>&1)" || fatal "swiftDialog package failed Gatekeeper assessment"
+    teamID="$(awk -F'[()]' '/origin=/{print $2}' <<< "${spctlOutput}" | tr -d ' ')"
+    [[ "${teamID}" == "${swiftDialogTeamID}" ]] || fatal "swiftDialog package team ID mismatch: ${teamID}"
 
-    /usr/sbin/installer -pkg "${tempPkgDir}/Dialog.pkg" -target / >>"${scriptLog}" 2>&1 || {
-        rm -rf "${tempPkgDir}"
-        fatal "swiftDialog installation failed"
-    }
+    /usr/sbin/installer -pkg "${pkgPath}" -target / >>"${scriptLog}" 2>&1 || fatal "swiftDialog installation failed"
 
-    rm -rf "${tempPkgDir}"
+    safeRemove "${tempPkgDir}"
 }
 
 function dialogTrustCheck() {
@@ -2815,11 +2820,11 @@ function preflightChecks() {
 
     loggedInUserFullname="$(id -F "${loggedInUser}" 2>/dev/null)"
     loggedInUserID="$(id -u "${loggedInUser}" 2>/dev/null)"
-    loggedInUserHomeDirectory="$(dscl . read "/Users/${loggedInUser}" NFSHomeDirectory 2>/dev/null | awk -F ' ' '{print $2}')"
-    if [[ -z "${loggedInUserHomeDirectory}" ]]; then
-        loggedInUserHomeDirectory="$(setHomeFolder "${loggedInUser}")"
-    fi
-    if [[ -z "${loggedInUserHomeDirectory}" || "${loggedInUserHomeDirectory}" == "/var/root" ]]; then
+    loggedInUserHomeDirectory="$(setHomeFolder "${loggedInUser}")"
+    loggedInUserHomeDirectory="${loggedInUserHomeDirectory%/}"
+    # A home of "/" would turn "${loggedInUserHome}/Library/..." into system paths
+    if [[ -z "${loggedInUserHomeDirectory}" || "${loggedInUserHomeDirectory}" != /* || ! -d "${loggedInUserHomeDirectory}" ]] \
+        || [[ "${loggedInUserHomeDirectory:A}" == "/" || "${loggedInUserHomeDirectory:A}" == "/private/var/root" ]]; then
         fatal "Resolved unsafe home directory for user '${loggedInUser}': ${loggedInUserHomeDirectory}"
     fi
     loggedInUserHome="${loggedInUserHomeDirectory}"

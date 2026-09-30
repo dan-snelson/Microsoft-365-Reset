@@ -18,6 +18,9 @@
     - Every run that reaches preflight now ends with a `NOTICE` summary line in all modes (including `silent`, which has no completion dialog): succeeded and failed operation counts, failed operation IDs, elapsed time, and exit code (for example, `Exiting: 9 succeeded, 1 failed (reset_teams); Elapsed Time: 0h:1m:12s; exit code 20`)
     - Teams background restore creates container folders as the console user (MOFA-aligned) instead of leaving root-owned parents
     - swiftDialog trust check now verifies the code signature against a Team ID requirement, checks ownership of `Contents/` and `Contents/MacOS/`, and exits `10` if the version is still unreadable after reinstall
+    - swiftDialog install stages `Dialog.pkg` in the root-private run directory, requires a passing Gatekeeper assessment, and verifies regular-file type and root ownership before `installer` runs
+    - Preflight exits `10` when the console user's home resolves to `/`, `/var/root`, a relative path, or a missing folder; home paths containing spaces are no longer truncated
+    - Microsoft package staging is removed on every failure path, so Teams download retries no longer retain failed downloads until exit
     - Treat `_mbsetupuser` (Setup Assistant) as no console user
     - Intro dialog now tells users to save their work before continuing
     - `README.md` now leads with a destructive-script caution, adds an impact column to the operations table, and clarifies that `test` is not a dry-run and `silent` skips confirmation
