@@ -690,13 +690,13 @@ function maybeRepairOfficeApp() {
     appVersion="$(defaults read "${appPath}/Contents/Info.plist" CFBundleVersion 2>/dev/null)"
     info "Found ${appName} version ${appVersion:-unreadable}"
 
-    # An unreadable version is not evidence of the legacy generation; codesign check below handles damage
+    # An unreadable version skips version-based checks (is-at-least treats "" as $ZSH_VERSION); codesign check below handles damage
     if [[ -n "${appVersion}" ]] && ! is-at-least 16.17 "${appVersion}"; then
         appGeneration="2016"
     fi
 
     if [[ "${appGeneration}" == "2019" ]]; then
-        if ! is-at-least 16.73 "${appVersion}" && is-at-least 11.0.0 "${osVersion}"; then
+        if [[ -n "${appVersion}" ]] && ! is-at-least 16.73 "${appVersion}" && is-at-least 11.0.0 "${osVersion}"; then
             info "${appName} is outdated; repairing"
             repairFromMicrosoftPkg "${appName}" "${download2019}" "" || return 1
             repairPerformed="true"
@@ -705,7 +705,7 @@ function maybeRepairOfficeApp() {
         customInfo="$(resolveCustomManifest "${manifestProductID}")"
         fullUpdater="${customInfo%%|*}"
         customVersion="${customInfo##*|}"
-        if [[ -n "${customVersion}" && "${appVersion}" != "${customVersion}" ]]; then
+        if [[ -n "${appVersion}" && -n "${customVersion}" && "${appVersion}" != "${customVersion}" ]]; then
             info "${appName} pinned version mismatch (${appVersion} != ${customVersion}); reinstalling"
             repairFromMicrosoftPkg "${appName}" "${download2019}" "${fullUpdater}" "${appPath}" || return 1
             repairPerformed="true"

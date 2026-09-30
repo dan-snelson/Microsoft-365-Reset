@@ -9,7 +9,7 @@
     - `remove_defender` now fails (exit `20`) when the Defender uninstaller exits non-zero or the app bundle remains
     - Auto-repair removes a damaged or version-mismatched app only after the replacement package downloads and passes verification
     - Custom MAU channels now require an `https://` `ManifestServer`; non-HTTPS values are ignored with a `WARNING`
-    - An unreadable app version no longer triggers the legacy Office 2016 installer
+    - An unreadable app version no longer triggers the legacy Office 2016 installer or version-based reinstalls; the code-signature check decides
     - User-context commands (restart prompt, `open`, `tccutil`, keychain, `defaults`) run once in the console user's session instead of re-running under plain `sudo -u` after a non-zero exit
     - Teams background restore creates container folders as the console user (MOFA-aligned) instead of leaving root-owned parents
     - swiftDialog trust check now verifies the code signature against a Team ID requirement, checks ownership of `Contents/` and `Contents/MacOS/`, and exits `10` if the version is still unreadable after reinstall
@@ -27,7 +27,7 @@
 - Interactive modes now log a `WARNING` when no `--operations` / `$5` allowlist is supplied (behavior otherwise unchanged)
 - `debug` mode uses a timestamped `PS4` and suspends xtrace inside keychain-deletion, Microsoft package-install, and swiftDialog-install helpers
 - Internal
-    - `Resources/createSelfExtracting.zsh` now generates wrappers that extract into a private `mktemp -d` directory, forward `"$@"`, preserve the exit code, and clean up
+    - `Resources/createSelfExtracting.zsh` now generates wrappers that extract into a private `mktemp -d` directory, forward `"$@"`, preserve the exit code, and clean up, and restricts `--target` to inert filename characters
     - Untracked the stale generated self-extracting wrapper and ignored `Resources/*_self-extracting-*.sh`
 
 ### Version 1.4.0 (02-Sep-2026)

@@ -8,7 +8,8 @@
 # For Microsoft 365 Reset
 # Date: 29-Sep-2026
 # - Extract into a root-private `mktemp -d` directory (not a fixed `/var/tmp` path)
-# - Forward wrapper arguments (Jamf `$1`-`$5`, CLI flags) to the extracted script
+# - Forward wrapper arguments (Jamf `$1`-`$6`, CLI flags) to the extracted script
+# - Restrict `--target` to inert filename characters
 
 # Script for creating self extracting base64 encoded files.
 
@@ -25,6 +26,10 @@ file_to_self_extracting_script() {
     base64_string=$(base64 -i "$1")
     filename=$(basename "$1")
     local target_name="$(basename "${2:-${TARGET_NAME}}")"
+    if [[ ! "${target_name}" =~ '^[A-Za-z0-9._-]+$' ]]; then
+        echo "Error: Invalid target name '${target_name}'; use letters, digits, '.', '_', or '-' only."
+        exit 1
+    fi
     output_script="${SCRIPT_DIR}/${filename}_self-extracting-${datestamp}.sh"
 
     cat <<EOF > "${output_script}"
