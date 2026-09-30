@@ -357,6 +357,12 @@ Local operation coverage requires the operation ID, implementation function, dis
 | `10` | Preflight/validation failure, including an empty `self-service` allowlist without `--allow-all-operations` / `$6` |
 | `20` | One or more operations failed |
 
+Every run that reaches preflight ends with a `NOTICE` log line summarizing succeeded and failed operation counts, failed operation IDs, elapsed time, and the exit code, so `silent` runs are auditable without the completion dialog:
+
+```text
+M365R (2.0.0): 2026-09-30 10:34:46  [NOTICE] Exiting: 9 succeeded, 1 failed (reset_teams); Elapsed Time: 0h:1m:12s; exit code 20
+```
+
 ## Validation
 
 Syntax check:

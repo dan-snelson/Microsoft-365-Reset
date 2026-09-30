@@ -274,6 +274,13 @@ function errorOut()  { updateScriptLog "ERROR" "${1}"; }
 function fatal()     { updateScriptLog "FATAL ERROR" "${1}"; exit 10; }
 
 function cleanup() {
+    local exitCode=$?
+
+    # Final summary in every mode (silent has no completion dialog)
+    local summary="Exiting: ${#completedOperations[@]} succeeded, ${#failedOperations[@]} failed"
+    [[ ${#failedOperations[@]} -gt 0 ]] && summary+=" (${failedOperations[*]})"
+    notice "${summary}; Elapsed Time: $(formattedElapsedTime); exit code ${exitCode}"
+
     rm -f "${dialogCommandFile}" 2>/dev/null
     rm -rf "${workDirectory}" 2>/dev/null
 }

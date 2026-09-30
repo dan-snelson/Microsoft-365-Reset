@@ -15,6 +15,7 @@
     - User-context commands (restart prompt, `open`, `tccutil`, keychain, `defaults`) run once in the console user's session instead of re-running under plain `sudo -u` after a non-zero exit
     - Keychain deletions no longer copy `security` output (including the deleted item's account and identity attributes) into the client log; each deletion logs a sanitized `INFO` line naming only the item label, service, or creator, and unexpected failures log a `WARNING`
     - `reset_excel` deletes the `Microsoft.Office.Excel.ProtectedDataServices` certificate in the console user's session instead of searching root's keychains
+- Every run now ends with a `NOTICE` summary line in all modes (including `silent`, which has no completion dialog): succeeded and failed operation counts, failed operation IDs, elapsed time, and exit code (for example, `Exiting: 9 succeeded, 1 failed (reset_teams); Elapsed Time: 0h:1m:12s; exit code 20`)
     - Teams background restore creates container folders as the console user (MOFA-aligned) instead of leaving root-owned parents
     - swiftDialog trust check now verifies the code signature against a Team ID requirement, checks ownership of `Contents/` and `Contents/MacOS/`, and exits `10` if the version is still unreadable after reinstall
     - Treat `_mbsetupuser` (Setup Assistant) as no console user
