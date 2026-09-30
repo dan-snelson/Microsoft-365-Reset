@@ -6,7 +6,7 @@
 #
 # Unified swiftDialog-driven replacement for expanded Office-Reset package workflows.
 #
-# https://snelson.us
+# https://snelson.us/m365r
 #
 ####################################################################################################
 #
