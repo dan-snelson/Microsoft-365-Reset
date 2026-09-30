@@ -12,16 +12,8 @@
 #
 # HISTORY
 #
-# Version 2.0.0b1, 29-Sep-2026, Dan K. Snelson (@dan-snelson)
-# - Hardened root path trust based on Monocle review findings
-#   - Repair packages now stage in a root-private per-run directory instead of `/Users/Shared/OnDemandInstaller`
-#   - swiftDialog command file stays root-owned (readable, not writable, by the console user)
-#   - swiftDialog binary must be root-owned, non-writable, and signed by Team ID PWA5E9TQ59 before use
-#   - Removed `/usr/local/bin` from `PATH`
-#   - Teams background staging now uses a private `mktemp -d` directory
-# - Added `remove_defender` to the destructive-action confirmation; log when the confirmation is acknowledged
-# - Log a warning when interactive modes run without an `--operations` / `$5` allowlist
-# - Scoped `debug` mode xtrace: timestamped `PS4`; suspended in keychain, package-install, and swiftDialog-install helpers
+# Version 2.0.0b2, 30-Sep-2026, Dan K. Snelson (@dan-snelson)
+# - See CHANGELOG.md for details
 #
 ####################################################################################################
 
@@ -37,7 +29,7 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 setopt NONOMATCH
 
 # Script identity
-scriptVersion="2.0.0b1"
+scriptVersion="2.0.0b2"
 humanReadableScriptName="Microsoft 365 Reset"
 scriptName="M365R"
 
@@ -62,6 +54,7 @@ dialogBinary="${dialogLinkPath}"    # pinned to the validated resolved path by d
 # Runtime inputs (Jamf parameters by default; CLI flags can override below)
 operationMode="${4:-self-service}"
 operationCSV="${5:-}"
+allowAllOperations="${6:-false}"    # self-service requires an allowlist unless explicitly opted in
 
 # Client-side Log
 scriptLog="/var/log/org.churchofjesuschrist.log"
@@ -75,7 +68,7 @@ while [[ $# -gt 0 ]]; do
         --mode)
             seenCLIFlag="true"
             if [[ -z "${2:-}" || "${2}" == -* ]]; then
-                echo "Missing or invalid value for --mode. Usage: $0 [--mode MODE] [--operations CSV]"
+                echo "Missing or invalid value for --mode. Usage: $0 [--mode MODE] [--operations CSV] [--allow-all-operations]"
                 exit 10
             fi
             operationMode="$2"
@@ -84,11 +77,16 @@ while [[ $# -gt 0 ]]; do
         --operations)
             seenCLIFlag="true"
             if [[ -z "${2:-}" || "${2}" == -* ]]; then
-                echo "Missing or invalid value for --operations. Usage: $0 [--mode MODE] [--operations CSV]"
+                echo "Missing or invalid value for --operations. Usage: $0 [--mode MODE] [--operations CSV] [--allow-all-operations]"
                 exit 10
             fi
             operationCSV="$2"
             shift 2
+            ;;
+        --allow-all-operations)
+            seenCLIFlag="true"
+            allowAllOperations="true"
+            shift
             ;;
         --*)
             echo "Unknown argument: $1"
@@ -121,6 +119,15 @@ case "${operationMode:l}" in
     *)
         echo "Invalid mode '${operationMode}'"
         exit 10
+        ;;
+esac
+
+case "${allowAllOperations:l}" in
+    true|yes|1)
+        allowAllOperations="true"
+        ;;
+    *)
+        allowAllOperations="false"
         ;;
 esac
 
@@ -208,7 +215,7 @@ operationDescription[reset_teams_force]="Closes Microsoft Teams, removes any ins
 operationDescription[reset_autoupdate]="Resets Microsoft AutoUpdate to default settings and installs the latest version of the tool."
 operationDescription[reset_license]="Closes all apps and removes Office licensing files plus core Office identity data without the broader Teams and OneDrive sign-in cleanup."
 operationDescription[reset_credentials]="Closes all apps and removes the Office license files. Sign-in credentials and cached tokens are removed from keychain."
-operationDescription[remove_office]="Removes all Microsoft 365 and Office apps, components, add-ins, templates and configuration data."
+operationDescription[remove_office]="Removes all Microsoft 365 and Office apps, components, add-ins, templates, configuration data, Microsoft logs and sign-in data. Warning: This cannot be undone. Microsoft Defender is not removed."
 operationDescription[remove_skypeforbusiness]="Closes Microsoft Skype for Business and then removes the application, configuration data, and keychain items."
 operationDescription[remove_defender]="Closes Microsoft Defender and then removes the application, configuration data, and keychain items."
 operationDescription[remove_acrobat_addin]="Removes the Adobe Acrobat add-in files for Word, Excel, and PowerPoint."
@@ -283,7 +290,7 @@ trap cleanup EXIT
 function getLoggedInUser() {
     local consoleUser
     consoleUser="$(/bin/echo 'show State:/Users/ConsoleUser' | /usr/sbin/scutil | /usr/bin/awk '/Name :/&&!/loginwindow/{print $3}')"
-    if [[ -n "${consoleUser}" && "${consoleUser}" != "root" ]]; then
+    if [[ -n "${consoleUser}" && "${consoleUser}" != "root" && "${consoleUser}" != "_mbsetupuser" ]]; then
         echo "${consoleUser}"
     else
         echo ""
@@ -308,7 +315,6 @@ function runAsUser() {
     local user="$1"
     shift
     local userID=""
-    local rc=0
 
     if [[ -z "${user}" ]]; then
         "$@"
@@ -317,9 +323,9 @@ function runAsUser() {
 
     userID="$(id -u "${user}" 2>/dev/null)"
     if [[ "${userID}" =~ ^[0-9]+$ ]]; then
+        # Run once in the user's GUI session; do not re-run on a non-zero exit
         /bin/launchctl asuser "${userID}" /usr/bin/sudo -u "${user}" "$@"
-        rc=$?
-        [[ ${rc} -eq 0 ]] && return 0
+        return $?
     fi
 
     /usr/bin/sudo -u "${user}" "$@"
@@ -343,6 +349,12 @@ function safeRemove() {
     fi
 
     return 0
+}
+
+function operationCSVIsEmpty() {
+    local normalizedOperationCSV="${operationCSV//[[:space:]]/}"
+    normalizedOperationCSV="${normalizedOperationCSV//,/}"
+    [[ -z "${normalizedOperationCSV}" ]]
 }
 
 function hasOperation() {
@@ -546,6 +558,7 @@ function repairFromMicrosoftPkg() {
     local appName="$1"
     local downloadURL="$2"
     local explicitPkgURL="$3"
+    local removeBeforeInstall="${4:-}"    # removed only after the package downloads and verifies
 
     local downloadFolder=""
     local pkgURL=""
@@ -605,6 +618,11 @@ function repairFromMicrosoftPkg() {
         return 1
     fi
 
+    if [[ -n "${removeBeforeInstall}" ]]; then
+        info "Removing existing ${appName} bundle before install: ${removeBeforeInstall}"
+        safeRemove "${removeBeforeInstall}" || return 1
+    fi
+
     info "Installing package for ${appName}"
     /usr/sbin/installer -pkg "${pkgPath}" -target / >>"${scriptLog}" 2>&1
     installRC=$?
@@ -629,6 +647,12 @@ function resolveCustomManifest() {
 
     manifestServer="$(getPrefValue "com.microsoft.autoupdate2" "ManifestServer" 2>/dev/null)"
     if [[ -z "${manifestServer}" ]]; then
+        echo "|"
+        return 0
+    fi
+
+    if [[ "${manifestServer}" != https://* ]]; then
+        warning "Ignoring non-HTTPS MAU ManifestServer: ${manifestServer}"
         echo "|"
         return 0
     fi
@@ -664,9 +688,10 @@ function maybeRepairOfficeApp() {
     fi
 
     appVersion="$(defaults read "${appPath}/Contents/Info.plist" CFBundleVersion 2>/dev/null)"
-    info "Found ${appName} version ${appVersion}"
+    info "Found ${appName} version ${appVersion:-unreadable}"
 
-    if ! is-at-least 16.17 "${appVersion}"; then
+    # An unreadable version is not evidence of the legacy generation; codesign check below handles damage
+    if [[ -n "${appVersion}" ]] && ! is-at-least 16.17 "${appVersion}"; then
         appGeneration="2016"
     fi
 
@@ -682,8 +707,7 @@ function maybeRepairOfficeApp() {
         customVersion="${customInfo##*|}"
         if [[ -n "${customVersion}" && "${appVersion}" != "${customVersion}" ]]; then
             info "${appName} pinned version mismatch (${appVersion} != ${customVersion}); reinstalling"
-            safeRemove "${appPath}"
-            repairFromMicrosoftPkg "${appName}" "${download2019}" "${fullUpdater}" || return 1
+            repairFromMicrosoftPkg "${appName}" "${download2019}" "${fullUpdater}" "${appPath}" || return 1
             repairPerformed="true"
         fi
     else
@@ -701,13 +725,12 @@ function maybeRepairOfficeApp() {
             warning "${appName} codesign mismatch limited to OLE.framework; proceeding"
         else
             warning "${appName} app bundle damaged; reinstalling"
-            safeRemove "${appPath}"
             if [[ "${appGeneration}" == "2016" ]]; then
-                repairFromMicrosoftPkg "${appName}" "${download2016}" "" || return 1
+                repairFromMicrosoftPkg "${appName}" "${download2016}" "" "${appPath}" || return 1
             else
                 customInfo="$(resolveCustomManifest "${manifestProductID}")"
                 fullUpdater="${customInfo%%|*}"
-                repairFromMicrosoftPkg "${appName}" "${download2019}" "${fullUpdater}" || return 1
+                repairFromMicrosoftPkg "${appName}" "${download2019}" "${fullUpdater}" "${appPath}" || return 1
             fi
             repairPerformed="true"
         fi
@@ -767,7 +790,6 @@ function dialogTrustCheck() {
     local resolvedPath
     local pathToCheck
     local ownerMode
-    local teamID
 
     if [[ -L "${dialogLinkPath}" && "$(stat -f '%u' "${dialogLinkPath}" 2>/dev/null)" != "0" ]]; then
         warning "swiftDialog link is not root-owned: ${dialogLinkPath}"
@@ -780,7 +802,7 @@ function dialogTrustCheck() {
         return 1
     fi
 
-    for pathToCheck in "${resolvedPath}" "${swiftDialogAppPath}" "${swiftDialogAppPath:h}"; do
+    for pathToCheck in "${resolvedPath}" "${resolvedPath:h}" "${resolvedPath:h:h}" "${swiftDialogAppPath}" "${swiftDialogAppPath:h}"; do
         ownerMode="$(stat -f '%u %Lp' "${pathToCheck}" 2>/dev/null)"
         if [[ -z "${ownerMode}" || "${ownerMode%% *}" != "0" ]] || (( 8#${ownerMode##* } & 8#022 )); then
             warning "swiftDialog path is not root-owned or is group/other-writable: ${pathToCheck} (${ownerMode:-unknown})"
@@ -788,9 +810,9 @@ function dialogTrustCheck() {
         fi
     done
 
-    teamID="$(/usr/bin/codesign -dv "${resolvedPath}" 2>&1 | awk -F'=' '/^TeamIdentifier=/{print $2}')"
-    if [[ "${teamID}" != "${swiftDialogTeamID}" ]]; then
-        warning "swiftDialog binary team ID mismatch: ${teamID:-none}"
+    # Validate the signature and signing identity (not just the displayed Team ID)
+    if ! /usr/bin/codesign --verify -R="anchor apple generic and certificate leaf[subject.OU] = \"${swiftDialogTeamID}\"" "${swiftDialogAppPath}" >>"${scriptLog}" 2>&1; then
+        warning "swiftDialog signature does not satisfy Team ID ${swiftDialogTeamID} requirement: ${swiftDialogAppPath}"
         return 1
     fi
 
@@ -817,6 +839,7 @@ function dialogCheck() {
         dialogInstall
         dialogTrustCheck || fatal "swiftDialog failed trust validation after reinstall; refusing to run as root"
         installedVersion="$("${dialogBinary}" --version 2>/dev/null | awk '{print $NF}' | tr -d '()')"
+        [[ -n "${installedVersion}" ]] || fatal "Unable to read swiftDialog version after reinstall"
     fi
 
     if ! is-at-least "${swiftDialogMinimumRequiredVersion}" "${installedVersion}"; then
@@ -844,7 +867,7 @@ function showIntroDialog() {
         --title "${humanReadableScriptName}" \
         --infotext "${scriptVersion}" \
         --messagefont "size=${fontSize}" \
-        --message "This tool _may_ help address Microsoft 365-related issues on this Mac:\n- Repair\n- Reset\n- Remove\n\nClick **Continue** to select actions; click **Cancel** to exit." \
+        --message "This tool _may_ help address Microsoft 365-related issues on this Mac:\n- Repair\n- Reset\n- Remove\n\n**Save your work first:** selected actions quit Microsoft apps without saving, and some actions permanently remove local data.\n\nClick **Continue** to select actions; click **Cancel** to exit." \
         --icon "${applicationIcon}" \
         --overlayicon "${organizationOverlayiconURL}" \
         --button1text "Continue" \
@@ -918,17 +941,18 @@ function showSelectionDialog() {
     local messageText
     local dialogOutput
     local rc
-    local normalizedOperationCSV="${operationCSV//[[:space:]]/}"
 
-    normalizedOperationCSV="${normalizedOperationCSV//,/}"
-
-    if [[ -n "${normalizedOperationCSV}" ]]; then
+    if ! operationCSVIsEmpty; then
         parseOperationCSV "${operationCSV}"
         validateOperationIDs "${selectedOperations[@]}"
         allowedOperations=("${selectedOperations[@]}")
         selectedOperations=()
     else
-        warning "No --operations / \$5 allowlist supplied; showing all ${#operationIDs[@]} operations (supply an allowlist for Self Service policies)"
+        if [[ "${allowAllOperations}" == "true" ]]; then
+            warning "No --operations / \$5 allowlist supplied; --allow-all-operations / \$6 opt-in set; showing all ${#operationIDs[@]} operations"
+        else
+            warning "No --operations / \$5 allowlist supplied; showing all ${#operationIDs[@]} operations (${operationMode} mode)"
+        fi
         allowedOperations=("${operationIDs[@]}")
     fi
 
@@ -1537,7 +1561,6 @@ function removeOfficePostinstall() {
         com.microsoft.teams
         com.microsoft.teams2
         com.microsoft.MSTeamsAudioDevice
-        com.microsoft.wdav
         com.microsoft.OneDrive
     )
 
@@ -1555,8 +1578,8 @@ function removeOfficePostinstall() {
     safeRemove "${loggedInUserHome}/Library/Cookies/com.microsoft.OneDriveStandaloneUpdater.binarycookies"
     safeRemove "${loggedInUserHome}/Library/Cookies/com.microsoft.teams.binarycookies"
 
-    safeRemove "/Library/Logs/Microsoft"
-    safeRemove "/Library/Application Support/Microsoft"
+    # Office-owned children of /Library/Application Support/Microsoft are removed in preinstall;
+    # the parent is retained (MOFA-aligned) so Defender, Edge, and other Microsoft products keep their data
     safeRemove "/Users/Shared/OnDemandInstaller"
 }
 
@@ -2195,7 +2218,8 @@ function resetTeamsOperation() {
     deleteGenericByLabel 'com.microsoft.teams.helper.HockeySDK' "${loggedInUser}"
 
     if [[ -n "${modernBackgroundsStaging}" && -d "${modernBackgroundsStaging}" && ! -L "${modernBackgroundsStaging}" ]]; then
-        /bin/mkdir -p "$(dirname "${modernBackgroundsPath}")" >>"${scriptLog}" 2>&1
+        # Create the container path as the user (MOFA-aligned) so parents are not left root-owned
+        runAsUser "${loggedInUser}" /bin/mkdir -p "$(dirname "${modernBackgroundsPath}")" >>"${scriptLog}" 2>&1
         if /bin/mv "${modernBackgroundsStaging}" "${modernBackgroundsPath}" >>"${scriptLog}" 2>&1; then
             /usr/sbin/chown -R "${loggedInUser}" "$(dirname "${modernBackgroundsPath}")" >>"${scriptLog}" 2>&1
         else
@@ -2520,12 +2544,20 @@ function op_remove_skypeforbusiness() {
 function op_remove_defender() {
     info "Starting operation: remove_defender"
 
+    local defenderAppPath="/Applications/Microsoft Defender.app"
+    local defenderUninstaller="${defenderAppPath}/Contents/Resources/Tools/uninstall/uninstall"
+    local defenderStatus=0
+
     pkill -9 'Microsoft Defender*' 2>/dev/null
 
-    if [[ -e "/Applications/Microsoft Defender.app/Contents/Resources/Tools/uninstall/uninstall" ]]; then
-        /Applications/Microsoft\ Defender.app/Contents/Resources/Tools/uninstall/uninstall >>"${scriptLog}" 2>&1
+    if [[ -e "${defenderUninstaller}" ]]; then
+        "${defenderUninstaller}" >>"${scriptLog}" 2>&1
+        defenderStatus=$?
+        if [[ ${defenderStatus} -ne 0 ]]; then
+            errorOut "Microsoft Defender uninstaller exited ${defenderStatus}"
+        fi
     else
-        safeRemove "/Applications/Microsoft Defender.app"
+        safeRemove "${defenderAppPath}" || defenderStatus=1
     fi
 
     safeRemove "${loggedInUserHome}/Library/Application Scripts/UBF8T346G9.com.microsoft.wdav"
@@ -2549,7 +2581,12 @@ function op_remove_defender() {
     /usr/sbin/pkgutil --forget com.microsoft.dlp.daemon >>"${scriptLog}" 2>&1
     /usr/sbin/pkgutil --forget com.microsoft.dlp.agent >>"${scriptLog}" 2>&1
 
-    return 0
+    if [[ -d "${defenderAppPath}" ]]; then
+        errorOut "Microsoft Defender app bundle still present after removal: ${defenderAppPath}"
+        defenderStatus=1
+    fi
+
+    return ${defenderStatus}
 }
 
 function op_remove_acrobat_addin() {
@@ -2731,6 +2768,10 @@ function preflightChecks() {
     loggedInUserHome="${loggedInUserHomeDirectory}"
 
     preFlight "Running as root; user: ${loggedInUserFullname} (${loggedInUser}) [${loggedInUserID}]; home: ${loggedInUserHome}"
+
+    if [[ "${operationMode}" == "self-service" && "${allowAllOperations}" != "true" ]] && operationCSVIsEmpty; then
+        fatal "No --operations / \$5 allowlist supplied in self-service mode; supply an allowlist, or pass --allow-all-operations / set \$6 to true for admin-only policies"
+    fi
 
     if [[ "${operationMode}" != "silent" ]]; then
         dialogCheck

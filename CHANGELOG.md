@@ -2,7 +2,20 @@
 
 ## Changelog
 
-### Version 2.0.0b1 (29-Sep-2026)
+### Version 2.0.0b2 (30-Sep-2026)
+- Addressed critical findings from a second Monocle security review
+    - :warning: **Breaking Change:** :warning: `self-service` mode now exits `10` during preflight when no `--operations` / `$5` allowlist is supplied; pass `--allow-all-operations` or set Parameter `$6` to `true` for deliberately broad, admin-only policies (`test` and `debug` keep the logged `WARNING`)
+    - `remove_office` no longer deletes `/Library/Application Support/Microsoft` or forgets the Defender (`com.microsoft.wdav`) package receipt, matching current MOFA Office Removal; Office-owned `MAU2.0`, `MERP2.0`, and `Office365` are still removed, and Defender and Edge data are preserved
+    - `remove_defender` now fails (exit `20`) when the Defender uninstaller exits non-zero or the app bundle remains
+    - Auto-repair removes a damaged or version-mismatched app only after the replacement package downloads and passes verification
+    - Custom MAU channels now require an `https://` `ManifestServer`; non-HTTPS values are ignored with a `WARNING`
+    - An unreadable app version no longer triggers the legacy Office 2016 installer
+    - User-context commands (restart prompt, `open`, `tccutil`, keychain, `defaults`) run once in the console user's session instead of re-running under plain `sudo -u` after a non-zero exit
+    - Teams background restore creates container folders as the console user (MOFA-aligned) instead of leaving root-owned parents
+    - swiftDialog trust check now verifies the code signature against a Team ID requirement, checks ownership of `Contents/` and `Contents/MacOS/`, and exits `10` if the version is still unreadable after reinstall
+    - Treat `_mbsetupuser` (Setup Assistant) as no console user
+    - Intro dialog now tells users to save their work before continuing
+    - `README.md` now leads with a destructive-script caution, adds an impact column to the operations table, and clarifies that `test` is not a dry-run and `silent` skips confirmation
 - Reviewed [MOFA](https://github.com/cocopuff2u/MOFA) repo
 - Hardened root path trust based on a Monocle security review
     - Microsoft repair packages now download into a root-private per-run staging directory instead of `/Users/Shared/OnDemandInstaller`, and are checked for regular-file and root ownership before `installer` runs
