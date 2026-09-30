@@ -5,16 +5,17 @@
 # mofa-consult
 #
 # Maintainer helper to sync a sibling MOFA checkout and report possible inclusions for this repo.
+# - `scripts/mofa-consult.zsh` bumped to `2.0.0`, removed `/usr/local/bin` from `PATH`, and synced `remove_office` and `reset_teams` report notes with the MOFA-aligned `2.0.0` behavior
 #
 ####################################################################################################
 
-export PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 setopt PIPE_FAIL
 
 autoload -Uz is-at-least
 
 scriptName="mofa-consult"
-scriptVersion="1.0.0"
+scriptVersion="2.0.0"
 defaultMofaRepo="../MOFA"
 defaultOutputPath="/var/tmp/M365R-MOFA-report.md"
 upstreamURL="https://github.com/cocopuff2u/MOFA.git"
@@ -446,9 +447,10 @@ function buildScriptCoverageSection() {
     coveredNoteForOperation[reset_powerpoint]="Current MOFA repair flow exits without removing configuration data after repair; local deferred cleanup matches that behavior."
     coveredNoteForOperation[reset_outlook]="Current MOFA repair flow exits without removing configuration data after repair; local deferred cleanup matches that behavior."
     coveredNoteForOperation[reset_onenote]="Current MOFA repair flow exits without removing configuration data after repair; local deferred cleanup matches that behavior."
+    coveredNoteForOperation[remove_office]="Removes only the Office-owned children of /Library/Application Support/Microsoft (MAU2.0, MERP2.0, Office365) and keeps the Defender (com.microsoft.wdav) package receipt, matching current MOFA Office Removal."
 
     intentionalNoteForOperation[reset_factory]="README parity note: reset_factory directly performs MOFA-aligned suite cleanup and intentionally adds package-era dependency expansion."
-    intentionalNoteForOperation[reset_teams]="README parity note: reset_teams suppresses Screen Recording UI in silent mode, preserves legacy Teams bundles during a standard reset, and does not install Teams when the main bundle is absent. Background preservation and TCC reset remain MOFA-aligned."
+    intentionalNoteForOperation[reset_teams]="README parity note: reset_teams suppresses Screen Recording UI in silent mode, preserves legacy Teams bundles during a standard reset, and does not install Teams when the main bundle is absent. Background preservation (restored in the console user's context) and TCC reset remain MOFA-aligned."
     intentionalNoteForOperation[reset_autoupdate]="README parity note: AutoUpdate registration treats new Teams as TEAMS21 while keeping classic Teams on the legacy product ID."
 
     localOnlyReason[reset_teams_force]="Repo-local operation ID exposing the force-reinstall behavior available through MOFA Teams reset's INSTALL=force argument; no separate MOFA script exists."
