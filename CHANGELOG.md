@@ -10,13 +10,15 @@
     - Microsoft package verification now requires `pkgutil --check-signature` to succeed and report an Apple-issued distribution certificate before comparing the Microsoft signer
     - Custom MAU channels now also require an `https://` `FullUpdaterLocation`; non-HTTPS values are ignored with a `WARNING` and the standard Microsoft download is used
     - The Microsoft identity keychain-database cleanup (`reset_onedrive`, `reset_credentials`) and the `com.microsoft.Office365V2.plist` rename (`reset_license`, `reset_credentials`) now run as the console user
-    - Auto-repair now moves a damaged or version-mismatched app aside (instead of deleting it) after the replacement package verifies, and restores it when the install fails or leaves nothing in place
+    - Auto-repair now moves a damaged or version-mismatched app aside (instead of deleting it) after the replacement package verifies, and restores it when the install fails, leaves nothing in place, or (Teams, OneDrive, and MAU) leaves a new bundle that fails codesign; previously a Teams bundle that failed codesign after install was retried after the original had already been discarded
+    - swiftDialog preflight now re-reads the installed version after an upgrade and exits `10` if it is still unreadable or below the required minimum
 - Reliability fixes
     - Per-app caches in the console user's temp folder are now cleaned as the console user; earlier releases targeted root's temp folder, so these removals did nothing
     - Force-quit now uses exact process names or anchored prefixes (for example, `^Microsoft Teams` and `^OneDrive`), so other vendors' Finder extensions and the Teams audio driver host are no longer matched by substring; OneDrive's Finder extension is matched by its bundle path, and `OneDrive Sync Service` is now included
     - Microsoft, Zoom, and WebEx launchd jobs are stopped with `launchctl bootout` by label in the console user's GUI domain or the system domain (previously `launchctl stop` with a plist path, which did nothing); `reset_autoupdate` reloads the MAU agent and daemon afterward, including when auto-repair fails, and fails (exit `20`) when a job cannot be reloaded
     - `reset_license` / `reset_credentials` restart `cfprefsd` only for the console user and root, not for other logged-in users
     - Home-folder lookup now prefers directory services over a `/Users/<shortname>` guess when `dscl` cannot return the path
+    - The completion dialog now shows a warning icon (instead of the green checkmark) when one or more operations failed
 - Internal
     - Pinned the Semgrep CLI in `.github/workflows/security-scan.yml` to `1.179.0` (previously the latest release via `--upgrade`)
     - `scripts/mofa-consult.zsh` writes its report to the per-user `$TMPDIR` by default (instead of a fixed `/var/tmp` path), refuses a symlinked `--output` path (opened once with no-follow), no longer pushes your MOFA fork by default (pass `--push-origin`), and updates the `reset_factory` and `reset_teams` parity notes

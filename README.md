@@ -243,7 +243,8 @@ Repair pipeline includes:
 - Microsoft signature verification
 - a damaged or version-mismatched app bundle is moved aside (root-private, outside the run directory) only after the replacement package has downloaded and verified
 - `installer -pkg ... -target /`
-- the original bundle is restored when the install fails or leaves nothing at the original path; otherwise it is discarded
+- for Teams, OneDrive, and MAU, the new bundle must pass `codesign -vv --deep` before the original is released
+- the original bundle is restored when the install fails, leaves nothing at the original path, or (Teams, OneDrive, and MAU) fails codesign; otherwise it is discarded
 
 When MAU is on a `Custom` channel, the `ManifestServer` preference and the manifest's `FullUpdaterLocation` must use `https://`; otherwise each is ignored with a `WARNING` and the standard Microsoft download is used.
 

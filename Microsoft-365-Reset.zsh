@@ -680,6 +680,7 @@ function repairFromMicrosoftPkg() {
     local downloadURL="$2"
     local explicitPkgURL="$3"
     local removeBeforeInstall="${4:-}"    # moved aside only after the package downloads and verifies; restored if the install fails
+    local verifyAppPath="${5:-}"          # when set, codesign must pass here before the displaced original is released
 
     local downloadFolder=""
     local pkgURL=""
@@ -763,9 +764,15 @@ function repairFromMicrosoftPkg() {
         /usr/sbin/installer -pkg "${pkgPath}" -target / >>"${scriptLog}" 2>&1
         installRC=$?
 
+        if [[ ${installRC} -eq 0 && -n "${verifyAppPath}" ]] \
+            && ! /usr/bin/codesign -vv --deep "${verifyAppPath}" >>"${scriptLog}" 2>&1; then
+            warning "${appName} app bundle failed codesign after install"
+            installRC=1
+        fi
+
         if [[ -n "${displacedPath}" ]] && [[ ${installRC} -ne 0 || ! -e "${removeBeforeInstall}" ]]; then
-            # Install failed or left nothing at the original path: put the original bundle back
-            warning "Install of ${appName} did not complete; restoring the original bundle"
+            # Install failed, failed validation, or left nothing at the original path: put the original bundle back
+            warning "Install of ${appName} did not complete or failed validation; restoring the original bundle"
             if [[ -e "${removeBeforeInstall}" || -L "${removeBeforeInstall}" ]]; then
                 /bin/mv -h "${removeBeforeInstall}" "${displacedRoot}/rejected" >>"${scriptLog}" 2>&1
             fi
@@ -1006,6 +1013,11 @@ function dialogCheck() {
         preFlight "swiftDialog ${installedVersion} is below required ${swiftDialogMinimumRequiredVersion}; upgrading"
         dialogInstall
         dialogTrustCheck || fatal "swiftDialog failed trust validation after reinstall; refusing to run as root"
+        installedVersion="$("${dialogBinary}" --version 2>/dev/null | awk '{print $NF}' | tr -d '()')"
+        # Guard empty first; is-at-least treats "" as $ZSH_VERSION
+        if [[ -z "${installedVersion}" ]] || ! is-at-least "${swiftDialogMinimumRequiredVersion}" "${installedVersion}"; then
+            fatal "swiftDialog ${installedVersion:-unreadable} is still below required ${swiftDialogMinimumRequiredVersion} after upgrade"
+        fi
     fi
 }
 
@@ -1363,9 +1375,11 @@ function showCompletionDialog() {
     local summary="**Results:**<br><br>- Completed operations: ${#completedOperations[@]}<br>- Failed operations: ${#failedOperations[@]}<br><br>**Elapsed Time:** $(formattedElapsedTime)"
     local repairedTitles=()
     local op
+    local completionIcon="SF=checkmark.circle.fill, weight=bold, colour1=#00ff44, colour2=#075c1e"
 
     if [[ ${#failedOperations[@]} -gt 0 ]]; then
         summary+="<br><br>Failed IDs: ${failedOperations[*]}"
+        completionIcon="SF=exclamationmark.triangle.fill, weight=bold, colour1=#FF7D08, colour2=#FF0810"
     fi
 
     if [[ ${#repairedOperations[@]} -gt 0 ]]; then
@@ -1380,7 +1394,7 @@ function showCompletionDialog() {
         --infotext "${scriptVersion}" \
         --messagefont "size=${fontSize}" \
         --message "${summary}" \
-        --icon "SF=checkmark.circle.fill, weight=bold, colour1=#00ff44, colour2=#075c1e" \
+        --icon "${completionIcon}" \
         --button1text "Close"
 }
 
@@ -2112,7 +2126,7 @@ function op_reset_onedrive() {
         /usr/bin/codesign -vv --deep /Applications/OneDrive.app >>"${scriptLog}" 2>&1
         if [[ $? -ne 0 ]]; then
             warning "Microsoft OneDrive app bundle damaged; replacing after package verification"
-            repairFromMicrosoftPkg "Microsoft OneDrive" "https://go.microsoft.com/fwlink/?linkid=861011" "" "/Applications/OneDrive.app" || return 1
+            repairFromMicrosoftPkg "Microsoft OneDrive" "https://go.microsoft.com/fwlink/?linkid=861011" "" "/Applications/OneDrive.app" "/Applications/OneDrive.app" || return 1
         fi
     fi
 
@@ -2388,19 +2402,18 @@ function resetTeamsOperation() {
 
     while [[ "${shouldInstallTeams}" == "true" && ${installAttempt} -le ${installationRetries} ]]; do
         info "Installing Microsoft Teams (attempt ${installAttempt}/${installationRetries})"
-        if repairFromMicrosoftPkg "Microsoft Teams" "${teamsPkgURL}" "" "${teamsReplacePath}"; then
-            /usr/bin/codesign -vv --deep "${teamsAppPath}" >>"${scriptLog}" 2>&1
-            if [[ $? -eq 0 ]]; then
-                local installedTeamsVersion
-                installedTeamsVersion="$(defaults read "${teamsAppPath}/Contents/Info.plist" CFBundleVersion 2>/dev/null)"
-                info "Microsoft Teams installed successfully at version ${installedTeamsVersion}"
-                teamsInstalled="true"
-                break
-            fi
-            warning "Microsoft Teams app bundle failed codesign after install attempt ${installAttempt}; retrying"
+        # Codesign is validated inside the helper so the displaced original is restored, not discarded, when the new bundle is invalid
+        if repairFromMicrosoftPkg "Microsoft Teams" "${teamsPkgURL}" "" "${teamsReplacePath}" "${teamsAppPath}"; then
+            local installedTeamsVersion
+            installedTeamsVersion="$(defaults read "${teamsAppPath}/Contents/Info.plist" CFBundleVersion 2>/dev/null)"
+            info "Microsoft Teams installed successfully at version ${installedTeamsVersion}"
+            teamsInstalled="true"
+            break
+        fi
+        warning "Microsoft Teams package download, install, or codesign validation failed on attempt ${installAttempt}; retrying"
+        # Fresh install left an invalid bundle with no original to restore: move it aside on the next attempt
+        if [[ -z "${teamsReplacePath}" && ( -e "${teamsAppPath}" || -L "${teamsAppPath}" ) ]]; then
             teamsReplacePath="${teamsAppPath}"
-        else
-            warning "Microsoft Teams package download or install failed on attempt ${installAttempt}; retrying"
         fi
         ((installAttempt++))
     done
@@ -2501,7 +2514,7 @@ function resetAutoUpdateCore() {
         /usr/bin/codesign -vv --deep "${mauAppPath}" >>"${scriptLog}" 2>&1
         if [[ $? -ne 0 ]]; then
             warning "Microsoft AutoUpdate app bundle damaged; replacing after package verification"
-            repairFromMicrosoftPkg "Microsoft AutoUpdate" "https://go.microsoft.com/fwlink/?linkid=830196" "" "${mauAppPath}" || return 1
+            repairFromMicrosoftPkg "Microsoft AutoUpdate" "https://go.microsoft.com/fwlink/?linkid=830196" "" "${mauAppPath}" "${mauAppPath}" || return 1
         fi
     fi
 

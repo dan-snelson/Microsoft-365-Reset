@@ -41,7 +41,7 @@ We will work with you to understand, reproduce, and fix the issue, then coordina
 - In `self-service` mode, always supply an `--operations` / Parameter `$5` allowlist; an empty allowlist exits `10` during preflight unless `--allow-all-operations` / Parameter `$6` is `true` (reserve that for deliberately broad, admin-only policies).
 - In `silent` mode, double-check your `--operations` or Parameter `$5` list — there is no UI confirmation.
 - `test` mode is **not** a dry run; it performs real operations.
-- Microsoft packages must pass `pkgutil --check-signature` (exit status, an Apple-issued distribution certificate, and the Microsoft signer) and content-length checks during auto-repair; a damaged or version-mismatched app is moved aside only after its replacement passes verification, and is restored if the install fails.
+- Microsoft packages must pass `pkgutil --check-signature` (exit status, an Apple-issued distribution certificate, and the Microsoft signer) and content-length checks during auto-repair; a damaged or version-mismatched app is moved aside only after its replacement passes verification, and is restored if the install fails or (Teams, OneDrive, and MAU) the new bundle fails codesign.
 - Root path trust guardrails:
     - `PATH` is pinned to `/usr/bin:/bin:/usr/sbin:/sbin`
     - swiftDialog must be root-owned, not group/other-writable, and signed by Team ID `PWA5E9TQ59`
