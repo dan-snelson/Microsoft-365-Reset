@@ -14,12 +14,12 @@
 - Reliability fixes
     - Per-app caches in the console user's temp folder are now cleaned as the console user; earlier releases targeted root's temp folder, so these removals did nothing
     - Force-quit now uses exact process names or anchored prefixes (for example, `^Microsoft Teams` and `^OneDrive`), so other vendors' Finder extensions and the Teams audio driver host are no longer matched by substring; OneDrive's Finder extension is matched by its bundle path, and `OneDrive Sync Service` is now included
-    - Microsoft, Zoom, and WebEx launchd jobs are stopped with `launchctl bootout` by label in the console user's GUI domain or the system domain (previously `launchctl stop` with a plist path, which did nothing); `reset_autoupdate` reloads the MAU agent and daemon afterward
+    - Microsoft, Zoom, and WebEx launchd jobs are stopped with `launchctl bootout` by label in the console user's GUI domain or the system domain (previously `launchctl stop` with a plist path, which did nothing); `reset_autoupdate` reloads the MAU agent and daemon afterward, including when auto-repair fails, and fails (exit `20`) when a job cannot be reloaded
     - `reset_license` / `reset_credentials` restart `cfprefsd` only for the console user and root, not for other logged-in users
     - Home-folder lookup now prefers directory services over a `/Users/<shortname>` guess when `dscl` cannot return the path
 - Internal
     - Pinned the Semgrep CLI in `.github/workflows/security-scan.yml` to `1.179.0` (previously the latest release via `--upgrade`)
-    - `scripts/mofa-consult.zsh` writes its report to the per-user `$TMPDIR` by default (instead of a fixed `/var/tmp` path), refuses a symlinked `--output` path, no longer pushes your MOFA fork by default (pass `--push-origin`), and updates the `reset_factory` and `reset_teams` parity notes
+    - `scripts/mofa-consult.zsh` writes its report to the per-user `$TMPDIR` by default (instead of a fixed `/var/tmp` path), refuses a symlinked `--output` path (opened once with no-follow), no longer pushes your MOFA fork by default (pass `--push-origin`), and updates the `reset_factory` and `reset_teams` parity notes
     - `AGENTS.md` and `.github` instructions: never run `chown -R` as root on a tree the console user can write; console-user data may be staged in the home folder only as the console user; damaged apps are moved aside and restored on a failed install; exit `20` includes paths an operation could not remove
 
 ### Version 2.0.0 (30-Sep-2026)

@@ -12,6 +12,7 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 setopt PIPE_FAIL
 
 autoload -Uz is-at-least
+zmodload -F zsh/system b:sysopen
 
 scriptName="mofa-consult"
 scriptVersion="2.0.1"
@@ -698,12 +699,15 @@ function writeReport() {
     local intentionalCount="${#intentionalItems[@]}"
     local localOnlyCount="${#localOnlyItems[@]}"
     local line
+    local reportFD
 
     outputDirectory="$(dirname "${outputPath}")"
     mkdir -p "${outputDirectory}" 2>/dev/null || dieReport "Unable to create report directory: ${outputDirectory}"
 
     [[ -L "${outputPath}" ]] && dieReport "Refusing to write report output through a symlink: ${outputPath}"
-    : > "${outputPath}" 2>/dev/null || dieReport "Unable to write report output: ${outputPath}"
+    # Open once with O_NOFOLLOW so a symlink swapped in after the check above is refused, not followed
+    sysopen -w -o creat,truncate,nofollow -m 600 -u reportFD "${outputPath}" 2>/dev/null \
+        || dieReport "Unable to write report output (symlink or unwritable): ${outputPath}"
 
     {
         print -r -- "# MOFA Consultation Report"
@@ -756,7 +760,8 @@ function writeReport() {
                 print -r -- "- ${line}"
             done
         fi
-    } > "${outputPath}" || dieReport "Unable to finish writing report output: ${outputPath}"
+    } >&${reportFD} || dieReport "Unable to finish writing report output: ${outputPath}"
+    exec {reportFD}>&-
 
     info "MOFA report written to ${outputPath}"
     print -r -- "Summary: ${candidateCount} candidate inclusion item(s), ${intentionalCount} intentional divergence(s), ${localOnlyCount} local-only operation(s)"

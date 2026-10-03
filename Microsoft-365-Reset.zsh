@@ -434,6 +434,19 @@ function bootoutLaunchJob() {
     return 0
 }
 
+function bootstrapLaunchJob() {
+    # Reload a booted-out job from its root-owned plist; an already-loaded job counts as success
+    local domainTarget="$1"    # system or gui/<uid>
+    local jobLabel="$2"
+    local plistPath="$3"
+    [[ -n "${domainTarget}" && -n "${jobLabel}" && -f "${plistPath}" ]] || return 0
+    /bin/launchctl print "${domainTarget}/${jobLabel}" >/dev/null 2>&1 && return 0
+    /bin/launchctl bootstrap "${domainTarget}" "${plistPath}" >/dev/null 2>&1
+    /bin/launchctl print "${domainTarget}/${jobLabel}" >/dev/null 2>&1 && return 0
+    warning "Unable to reload launchd job: ${domainTarget}/${jobLabel}"
+    return 1
+}
+
 function safeRemoveMatches() {
     # Remove each expanded glob match through safeRemove; callers pass (N) globs so no match is a no-op
     local matchPath
@@ -633,6 +646,7 @@ EOS
 
 function verifyMicrosoftPkgSignature() {
     # Require a passing pkgutil verdict before comparing the printed signer
+    # "trusted by macOS" / "Mac OS X" status is rejected on purpose: it accepts any trusted root (for example, an MDM-installed CA), not Apple Developer ID
     local pkgPath="$1"
     local signatureOutput
     local signing
@@ -2417,7 +2431,6 @@ function op_reset_teams_force() {
 
 function op_reset_autoupdate() {
     info "Starting operation: reset_autoupdate"
-    local mauAppPath="/Library/Application Support/Microsoft/MAU2.0/Microsoft AutoUpdate.app"
 
     pkill -9 '^Microsoft (AutoUpdate|Update Assistant|AU )' 2>/dev/null
     pkill -9 '^com\.microsoft\.autoupdate\.' 2>/dev/null
@@ -2425,6 +2438,21 @@ function op_reset_autoupdate() {
     bootoutLaunchJob "gui/${loggedInUserID}" com.microsoft.update.agent
     bootoutLaunchJob "gui/${loggedInUserID}" com.microsoft.autoupdate.helper
     bootoutLaunchJob system com.microsoft.autoupdate.helper
+
+    local coreRC=0
+    local reloadRC=0
+    resetAutoUpdateCore || coreRC=1
+
+    # Reload the MAU jobs booted out above, even when auto-repair failed, so updates resume before the next login
+    bootstrapLaunchJob system com.microsoft.autoupdate.helper "/Library/LaunchDaemons/com.microsoft.autoupdate.helper.plist" || reloadRC=1
+    bootstrapLaunchJob "gui/${loggedInUserID}" com.microsoft.update.agent "/Library/LaunchAgents/com.microsoft.update.agent.plist" || reloadRC=1
+    bootstrapLaunchJob "gui/${loggedInUserID}" com.microsoft.autoupdate.helper "/Library/LaunchAgents/com.microsoft.autoupdate.helper.plist" || reloadRC=1
+
+    (( coreRC == 0 && reloadRC == 0 ))
+}
+
+function resetAutoUpdateCore() {
+    local mauAppPath="/Library/Application Support/Microsoft/MAU2.0/Microsoft AutoUpdate.app"
 
     safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.autoupdate2.plist"
     safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.autoupdate.fba.plist"
@@ -2497,11 +2525,6 @@ function op_reset_autoupdate() {
     registerMAUStaticApplicationIfPresent "/Applications/Company Portal.app" "{ 'Application ID' = 'IMCP01'; LCID = 1033 ; }"
     registerMAUStaticApplicationIfPresent "/Applications/Microsoft Defender.app" "{ 'Application ID' = 'WDAV00'; LCID = 1033 ; }"
     registerMAUStaticApplicationIfPresent "/Applications/Microsoft Defender ATP.app" "{ 'Application ID' = 'WDAV00'; LCID = 1033 ; }"
-
-    # Reload the MAU jobs booted out above so updates resume before the next login (root-owned plists; already-loaded errors ignored)
-    [[ -f "/Library/LaunchDaemons/com.microsoft.autoupdate.helper.plist" ]] && /bin/launchctl bootstrap system "/Library/LaunchDaemons/com.microsoft.autoupdate.helper.plist" >/dev/null 2>&1
-    [[ -f "/Library/LaunchAgents/com.microsoft.update.agent.plist" ]] && /bin/launchctl bootstrap "gui/${loggedInUserID}" "/Library/LaunchAgents/com.microsoft.update.agent.plist" >/dev/null 2>&1
-    [[ -f "/Library/LaunchAgents/com.microsoft.autoupdate.helper.plist" ]] && /bin/launchctl bootstrap "gui/${loggedInUserID}" "/Library/LaunchAgents/com.microsoft.autoupdate.helper.plist" >/dev/null 2>&1
 
     return 0
 }
