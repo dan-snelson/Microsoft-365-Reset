@@ -12,7 +12,7 @@
 #
 # HISTORY
 #
-# Version 2.0.0, 30-Sep-2026, Dan K. Snelson (@dan-snelson)
+# Version 2.0.1, 03-Oct-2026, Dan K. Snelson (@dan-snelson)
 # - See CHANGELOG.md for details
 #
 ####################################################################################################
@@ -29,7 +29,7 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 setopt NONOMATCH
 
 # Script identity
-scriptVersion="2.0.0"
+scriptVersion="2.0.1"
 humanReadableScriptName="Microsoft 365 Reset"
 scriptName="M365R"
 
@@ -144,6 +144,7 @@ resolvedOperations=()
 failedOperations=()
 completedOperations=()
 repairedOperations=()
+removalFailures="0"    # paths safeRemove did not remove; reset per operation and checked by main
 dialogPID=""
 interactiveCancelReturnCode="30"
 
@@ -153,6 +154,7 @@ loggedInUserFullname=""
 loggedInUserID=""
 loggedInUserHome=""
 loggedInUserHomeDirectory=""
+loggedInUserTempDirectory=""    # console user's DARWIN_USER_TEMP_DIR (root's TMPDIR never points here)
 
 # Operation metadata used by selection UI and validation
 operationIDs=(
@@ -308,12 +310,12 @@ function setHomeFolder() {
     local targetUser="$1"
     local homePath
     homePath="$(dscl . read /Users/"${targetUser}" NFSHomeDirectory 2>/dev/null | awk -F': ' '/NFSHomeDirectory/{print $2}')"
+    # dscl wraps values containing spaces onto a second line; prefer directory services over the /Users/<shortname> guess
     if [[ -z "${homePath}" ]]; then
-        if [[ -d "/Users/${targetUser}" ]]; then
-            homePath="/Users/${targetUser}"
-        else
-            homePath="$(/usr/bin/dscacheutil -q user -a name "${targetUser}" 2>/dev/null | awk -F': ' '/^dir:/{print $2; exit}')"
-        fi
+        homePath="$(/usr/bin/dscacheutil -q user -a name "${targetUser}" 2>/dev/null | awk -F': ' '/^dir:/{print $2; exit}')"
+    fi
+    if [[ -z "${homePath}" && -d "/Users/${targetUser}" ]]; then
+        homePath="/Users/${targetUser}"
     fi
     echo "${homePath}"
 }
@@ -362,26 +364,32 @@ function pathHasTrustedParents() {
     [[ "${(L)canonicalParent}" == "${(L)expectedPath}" ]]
 }
 
-function pathIsUnderUserHome() {
+function pathIsUserScoped() {
+    # Paths the console user owns: their home folder and their per-user temp folder
     local targetPath="$1"
-    [[ -n "${loggedInUser}" && -n "${loggedInUserHome}" && "${loggedInUserHome}" != "/" && "${targetPath}" == "${loggedInUserHome}/"* ]]
+    [[ -n "${loggedInUser}" ]] || return 1
+    [[ -n "${loggedInUserHome}" && "${loggedInUserHome}" != "/" && "${targetPath}" == "${loggedInUserHome}/"* ]] && return 0
+    [[ -n "${loggedInUserTempDirectory}" && "${targetPath}" == "${loggedInUserTempDirectory}/"* ]]
 }
 
 function safeRemove() {
+    # Every path not removed counts against the current operation (see main)
     local targetPath="$1"
 
     if [[ -z "${targetPath}" || "${targetPath}" == "/" ]]; then
         warning "safeRemove refused unsafe path: '${targetPath}'"
+        (( removalFailures += 1 ))
         return 1
     fi
 
     if [[ -e "${targetPath}" || -L "${targetPath}" ]]; then
         if ! pathHasTrustedParents "${targetPath}"; then
             warning "safeRemove refused path with a symlinked parent directory: '${targetPath}'"
+            (( removalFailures += 1 ))
             return 1
         fi
         local rmStatus
-        if pathIsUnderUserHome "${targetPath}"; then
+        if pathIsUserScoped "${targetPath}"; then
             # Remove as the console user so a symlink swapped in after the check cannot redirect a root deletion; no root fallback
             runAsUser "${loggedInUser}" /bin/rm -rf "${targetPath}" >>"${scriptLog}" 2>&1
         else
@@ -390,10 +398,39 @@ function safeRemove() {
         rmStatus=$?
         if [[ ${rmStatus} -ne 0 ]]; then
             warning "Failed to remove path: ${targetPath}"
+            (( removalFailures += 1 ))
             return ${rmStatus}
         fi
     fi
 
+    return 0
+}
+
+function safeRemoveBestEffort() {
+    # safeRemove without failing the current operation (staging cleanup, per-user temp items)
+    local targetPath="$1"
+    local priorRemovalFailures="${removalFailures}"
+    local removeRC=0
+
+    safeRemove "${targetPath}"
+    removeRC=$?
+    removalFailures="${priorRemovalFailures}"
+    return ${removeRC}
+}
+
+function safeRemoveUserTemp() {
+    # macOS protects some per-app temp folders from unlink (sunlnk); their contents still clear, so failures do not fail the operation
+    local itemName="$1"
+    [[ -n "${loggedInUserTempDirectory}" && -n "${itemName}" ]] || return 0
+    safeRemoveBestEffort "${loggedInUserTempDirectory}/${itemName}"
+}
+
+function bootoutLaunchJob() {
+    # bootout by label: "launchctl stop <plist path>" was a no-op, and root "unload" never reached the user's GUI domain
+    local domainTarget="$1"    # system or gui/<uid>
+    local jobLabel="$2"
+    [[ -n "${domainTarget}" && -n "${jobLabel}" ]] || return 0
+    /bin/launchctl bootout "${domainTarget}/${jobLabel}" >/dev/null 2>&1
     return 0
 }
 
@@ -469,8 +506,9 @@ function appendRepairedOperation() {
 }
 
 function findKeychainDB() {
+    # Search as the console user; -type f skips a planted symlink
     local userHome="$1"
-    find "${userHome}/Library/Keychains" -name keychain-2.db -print -quit 2>/dev/null
+    runAsUser "${loggedInUser}" /usr/bin/find "${userHome}/Library/Keychains" -type f -name keychain-2.db -print -quit 2>/dev/null
 }
 
 function findEntryGenericByLabel() {
@@ -594,9 +632,13 @@ EOS
 }
 
 function verifyMicrosoftPkgSignature() {
+    # Require a passing pkgutil verdict before comparing the printed signer
     local pkgPath="$1"
+    local signatureOutput
     local signing
-    signing="$(/usr/sbin/pkgutil --check-signature "${pkgPath}" 2>/dev/null | awk -F': ' '/Developer ID Installer/{print $2}' | awk '{$1=$1};1')"
+    signatureOutput="$(/usr/sbin/pkgutil --check-signature "${pkgPath}" 2>/dev/null)" || return 1
+    [[ "${signatureOutput}" == *"Status: signed by a developer certificate issued by Apple for distribution"* ]] || return 1
+    signing="$(echo "${signatureOutput}" | awk -F': ' '/Developer ID Installer/{print $2; exit}' | awk '{$1=$1};1')"
     [[ "${signing}" == "Microsoft Corporation (UBF8T346G9)" ]]
 }
 
@@ -623,7 +665,7 @@ function repairFromMicrosoftPkg() {
     local appName="$1"
     local downloadURL="$2"
     local explicitPkgURL="$3"
-    local removeBeforeInstall="${4:-}"    # removed only after the package downloads and verifies
+    local removeBeforeInstall="${4:-}"    # moved aside only after the package downloads and verifies; restored if the install fails
 
     local downloadFolder=""
     local pkgURL=""
@@ -631,7 +673,9 @@ function repairFromMicrosoftPkg() {
     local pkgPath=""
     local expectedSize=""
     local localSize=""
-    local installRC=0
+    local displacedRoot=""
+    local displacedPath=""
+    local installRC=1
 
     # Root-private per-run staging (inside root-owned workDirectory; removed by cleanup trap)
     downloadFolder="$(mktemp -d "${workDirectory}/OnDemandInstaller.XXXXXX")"
@@ -685,18 +729,46 @@ function repairFromMicrosoftPkg() {
             return 1
         fi
 
-        if [[ -n "${removeBeforeInstall}" ]]; then
-            info "Removing existing ${appName} bundle before install: ${removeBeforeInstall}"
-            safeRemove "${removeBeforeInstall}" || return 1
+        if [[ -n "${removeBeforeInstall}" && ( -e "${removeBeforeInstall}" || -L "${removeBeforeInstall}" ) ]]; then
+            # Root-private, outside workDirectory so the exit trap never deletes the only copy; no .app extension, so it is not registered as an app
+            displacedRoot="$(mktemp -d "/private/var/tmp/${scriptName}_Displaced.XXXXXX")"
+            if [[ -z "${displacedRoot}" || ! -d "${displacedRoot}" ]] || ! chmod 700 "${displacedRoot}"; then
+                errorOut "Unable to create private staging directory for the existing ${appName} bundle"
+                return 1
+            fi
+            displacedPath="${displacedRoot}/${removeBeforeInstall:t:r}"
+            info "Moving existing ${appName} bundle aside before install: ${removeBeforeInstall} -> ${displacedPath}"
+            if ! /bin/mv -h "${removeBeforeInstall}" "${displacedPath}" >>"${scriptLog}" 2>&1; then
+                errorOut "Unable to move existing ${appName} bundle aside; skipping install"
+                displacedPath=""
+                return 1
+            fi
         fi
 
         info "Installing package for ${appName}"
         /usr/sbin/installer -pkg "${pkgPath}" -target / >>"${scriptLog}" 2>&1
         installRC=$?
 
+        if [[ -n "${displacedPath}" ]] && [[ ${installRC} -ne 0 || ! -e "${removeBeforeInstall}" ]]; then
+            # Install failed or left nothing at the original path: put the original bundle back
+            warning "Install of ${appName} did not complete; restoring the original bundle"
+            if [[ -e "${removeBeforeInstall}" || -L "${removeBeforeInstall}" ]]; then
+                /bin/mv -h "${removeBeforeInstall}" "${displacedRoot}/rejected" >>"${scriptLog}" 2>&1
+            fi
+            if [[ ! -e "${removeBeforeInstall}" && ! -L "${removeBeforeInstall}" ]] \
+                && /bin/mv -h "${displacedPath}" "${removeBeforeInstall}" >>"${scriptLog}" 2>&1; then
+                info "Restored original ${appName} bundle: ${removeBeforeInstall}"
+            else
+                errorOut "Unable to restore ${appName}; original bundle retained at ${displacedPath}"
+                displacedRoot=""    # keep for manual recovery
+            fi
+            [[ ${installRC} -eq 0 ]] && installRC=1
+        fi
+
         return ${installRC}
     } always {
-        safeRemove "${downloadFolder%/}"
+        [[ -n "${displacedRoot}" ]] && safeRemoveBestEffort "${displacedRoot}"
+        safeRemoveBestEffort "${downloadFolder%/}"
     }
 }
 
@@ -727,7 +799,11 @@ function resolveCustomManifest() {
 
     fullUpdater="$(/usr/bin/nscurl --location "${manifestServer}/0409${manifestProductID}.xml" 2>/dev/null | grep -A1 -m1 'FullUpdaterLocation' | grep 'string' | sed -e 's,.*<string>\([^<]*\)</string>.*,\1,g')"
     customVersion=""
-    if [[ "${fullUpdater}" == https://* ]]; then
+    if [[ -n "${fullUpdater}" && "${fullUpdater}" != https://* ]]; then
+        warning "Ignoring non-HTTPS MAU FullUpdaterLocation: ${fullUpdater}"
+        fullUpdater=""
+    fi
+    if [[ -n "${fullUpdater}" ]]; then
         customVersion="$(/usr/bin/nscurl --location "${manifestServer}/0409${manifestProductID}-chk.xml" 2>/dev/null | grep -A1 -m1 'Update Version' | grep 'string' | sed -e 's,.*<string>\([^<]*\)</string>.*,\1,g')"
     fi
 
@@ -1396,10 +1472,10 @@ function prepareForAcrobatAddinRemoval() {
         fi
 
         info "Silent mode: force-stopping Word, Excel, PowerPoint, and Acrobat before add-in removal"
-        pkill -9 'Microsoft Word' 2>/dev/null
-        pkill -9 'Microsoft Excel' 2>/dev/null
-        pkill -9 'Microsoft PowerPoint' 2>/dev/null
-        pkill -9 'AdobeAcrobat' 2>/dev/null
+        pkill -9 -x 'Microsoft Word' 2>/dev/null
+        pkill -9 -x 'Microsoft Excel' 2>/dev/null
+        pkill -9 -x 'Microsoft PowerPoint' 2>/dev/null
+        pkill -9 -x 'AdobeAcrobat' 2>/dev/null
         return 0
     fi
 
@@ -1417,30 +1493,17 @@ function prepareForAcrobatAddinRemoval() {
 }
 
 function stopCommonOfficeProcesses() {
-    pkill -9 'Microsoft Word' 2>/dev/null
-    pkill -9 'Microsoft Excel' 2>/dev/null
-    pkill -9 'Microsoft PowerPoint' 2>/dev/null
-    pkill -9 'Microsoft Outlook' 2>/dev/null
-    pkill -9 'Microsoft OneNote' 2>/dev/null
-    pkill -9 'OneDrive' 2>/dev/null
-    pkill -9 'OneDrive Finder Integration' 2>/dev/null
-    pkill -9 'FinderSync' 2>/dev/null
-    pkill -9 'OneDriveStandaloneUpdater' 2>/dev/null
-    pkill -9 'OneDriveUpdater' 2>/dev/null
-    pkill -9 'MSTeams' 2>/dev/null
-    pkill -9 'Microsoft Teams' 2>/dev/null
-    pkill -9 'Microsoft Teams Helper' 2>/dev/null
-    pkill -9 'Microsoft Teams WebView' 2>/dev/null
-    pkill -9 'Microsoft Teams Launcher' 2>/dev/null
-    pkill -9 'Microsoft Teams (work preview)' 2>/dev/null
-    pkill -9 'Microsoft Teams*' 2>/dev/null
-    pkill -9 'Microsoft AutoUpdate' 2>/dev/null
-    pkill -9 'Microsoft Update Assistant' 2>/dev/null
-    pkill -9 'Microsoft AU Daemon' 2>/dev/null
-    pkill -9 'Microsoft AU Bootstrapper' 2>/dev/null
-    pkill -9 'com.microsoft.autoupdate.helper' 2>/dev/null
-    pkill -9 'com.microsoft.autoupdate.helpertool' 2>/dev/null
-    pkill -9 'com.microsoft.autoupdate.bootstrapper.helper' 2>/dev/null
+    pkill -9 -x 'Microsoft Word' 2>/dev/null
+    pkill -9 -x 'Microsoft Excel' 2>/dev/null
+    pkill -9 -x 'Microsoft PowerPoint' 2>/dev/null
+    pkill -9 -x 'Microsoft Outlook' 2>/dev/null
+    pkill -9 -x 'Microsoft OneNote' 2>/dev/null
+    pkill -9 '^OneDrive' 2>/dev/null
+    pkill -9 -f '/Applications/OneDrive\.app/Contents/PlugIns/FinderSync\.appex/' 2>/dev/null
+    pkill -9 -x 'MSTeams' 2>/dev/null
+    pkill -9 '^Microsoft Teams' 2>/dev/null
+    pkill -9 '^Microsoft (AutoUpdate|Update Assistant|AU )' 2>/dev/null
+    pkill -9 '^com\.microsoft\.autoupdate\.' 2>/dev/null
 }
 
 function removeOfficePreinstall() {
@@ -1448,22 +1511,13 @@ function removeOfficePreinstall() {
 
     stopCommonOfficeProcesses
 
-    launchctl stop /Library/LaunchAgents/com.microsoft.update.agent.plist 2>/dev/null
-    launchctl stop /Library/LaunchAgents/com.microsoft.autoupdate.helper.plist 2>/dev/null
-    launchctl stop /Library/LaunchAgents/com.microsoft.OneDriveStandaloneUpdater.plist 2>/dev/null
-    launchctl stop /Library/LaunchAgents/com.microsoft.SyncReporter.plist 2>/dev/null
-    launchctl stop /Library/LaunchDaemons/com.microsoft.autoupdate.helper 2>/dev/null
-    launchctl stop /Library/LaunchDaemons/com.microsoft.autoupdate.helper.plist 2>/dev/null
-    launchctl stop /Library/LaunchDaemons/com.microsoft.OneDriveUpdaterDaemon.plist 2>/dev/null
-    launchctl stop /Library/LaunchDaemons/com.microsoft.teams.TeamsUpdaterDaemon.plist 2>/dev/null
-
-    launchctl unload /Library/LaunchAgents/com.microsoft.update.agent.plist 2>/dev/null
-    launchctl unload /Library/LaunchAgents/com.microsoft.autoupdate.helper.plist 2>/dev/null
-    launchctl unload /Library/LaunchAgents/com.microsoft.OneDriveStandaloneUpdater.plist 2>/dev/null
-    launchctl unload /Library/LaunchDaemons/com.microsoft.autoupdate.helper 2>/dev/null
-    launchctl unload /Library/LaunchDaemons/com.microsoft.autoupdate.helper.plist 2>/dev/null
-    launchctl unload /Library/LaunchDaemons/com.microsoft.OneDriveUpdaterDaemon.plist 2>/dev/null
-    launchctl unload /Library/LaunchDaemons/com.microsoft.teams.TeamsUpdaterDaemon.plist 2>/dev/null
+    bootoutLaunchJob "gui/${loggedInUserID}" com.microsoft.update.agent
+    bootoutLaunchJob "gui/${loggedInUserID}" com.microsoft.autoupdate.helper
+    bootoutLaunchJob "gui/${loggedInUserID}" com.microsoft.OneDriveStandaloneUpdater
+    bootoutLaunchJob "gui/${loggedInUserID}" com.microsoft.SyncReporter
+    bootoutLaunchJob system com.microsoft.autoupdate.helper
+    bootoutLaunchJob system com.microsoft.OneDriveUpdaterDaemon
+    bootoutLaunchJob system com.microsoft.teams.TeamsUpdaterDaemon
 
     safeRemove "/Applications/Microsoft Word.app"
     safeRemove "/Applications/Microsoft Excel.app"
@@ -1701,8 +1755,7 @@ function cleanupFactoryResetArtifacts() {
     safeRemove "/Library/Preferences/com.microsoft.shared.plist"
     safeRemove "/Library/Preferences/com.microsoft.office.plist"
     safeRemove "/Library/Preferences/com.microsoft.teams.plist"
-    safeRemove "/Library/Managed Preferences/com.microsoft.shared.plist"
-    safeRemove "/Library/Managed Preferences/com.microsoft.office.plist"
+    # /Library/Managed Preferences is profile-delivered policy; leave it to MDM (removed only by remove_office)
     safeRemove "/var/root/Library/Preferences/com.microsoft.autoupdate2.plist"
     safeRemove "/var/root/Library/Preferences/com.microsoft.autoupdate.fba.plist"
 
@@ -1747,8 +1800,8 @@ function cleanupFactoryResetArtifacts() {
 function op_reset_factory() {
     info "Starting operation: reset_factory"
     stopCommonOfficeProcesses
-    pkill -9 'Microsoft Teams Helper' 2>/dev/null
-    pkill -9 'com.microsoft.teams2.launcher' 2>/dev/null
+    pkill -9 '^Microsoft Teams' 2>/dev/null
+    pkill -9 -x 'com\.microsoft\.teams2\.launcher' 2>/dev/null
     cleanupFactoryResetArtifacts
     return 0
 }
@@ -1767,7 +1820,7 @@ function op_reset_word() {
     local osVersion
     osVersion="$(sw_vers -productVersion)"
 
-    pkill -9 'Microsoft Word' 2>/dev/null
+    pkill -9 -x 'Microsoft Word' 2>/dev/null
 
     maybeRepairOfficeApp \
         "Microsoft Word" \
@@ -1784,7 +1837,6 @@ function op_reset_word() {
     fi
 
     safeRemove "/Library/Preferences/com.microsoft.Word.plist"
-    safeRemove "/Library/Managed Preferences/com.microsoft.Word.plist"
     safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.Word.plist"
     safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.Word"
     safeRemove "${loggedInUserHome}/Library/Application Scripts/com.microsoft.Word"
@@ -1802,7 +1854,7 @@ function op_reset_word() {
 
     cleanupOfficeCommonGroupContainers
 
-    safeRemove "${TMPDIR}/com.microsoft.Word"
+    safeRemoveUserTemp "com.microsoft.Word"
     return 0
 }
 
@@ -1811,7 +1863,7 @@ function op_reset_excel() {
     local osVersion
     osVersion="$(sw_vers -productVersion)"
 
-    pkill -9 'Microsoft Excel' 2>/dev/null
+    pkill -9 -x 'Microsoft Excel' 2>/dev/null
 
     maybeRepairOfficeApp \
         "Microsoft Excel" \
@@ -1828,7 +1880,6 @@ function op_reset_excel() {
     fi
 
     safeRemove "/Library/Preferences/com.microsoft.Excel.plist"
-    safeRemove "/Library/Managed Preferences/com.microsoft.Excel.plist"
     safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.Excel.plist"
     safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.Excel"
     safeRemove "${loggedInUserHome}/Library/Application Scripts/com.microsoft.Excel"
@@ -1851,7 +1902,7 @@ function op_reset_excel() {
 
     runKeychainDelete "certificate 'Microsoft.Office.Excel.ProtectedDataServices'" "${loggedInUser}" 1 delete-certificate -c 'Microsoft.Office.Excel.ProtectedDataServices'
 
-    safeRemove "${TMPDIR}/com.microsoft.Excel"
+    safeRemoveUserTemp "com.microsoft.Excel"
     return 0
 }
 
@@ -1860,7 +1911,7 @@ function op_reset_powerpoint() {
     local osVersion
     osVersion="$(sw_vers -productVersion)"
 
-    pkill -9 'Microsoft PowerPoint' 2>/dev/null
+    pkill -9 -x 'Microsoft PowerPoint' 2>/dev/null
 
     maybeRepairOfficeApp \
         "Microsoft PowerPoint" \
@@ -1877,7 +1928,6 @@ function op_reset_powerpoint() {
     fi
 
     safeRemove "/Library/Preferences/com.microsoft.Powerpoint.plist"
-    safeRemove "/Library/Managed Preferences/com.microsoft.Powerpoint.plist"
     safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.Powerpoint.plist"
     safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.Powerpoint"
     safeRemove "${loggedInUserHome}/Library/Application Scripts/com.microsoft.Powerpoint"
@@ -1899,7 +1949,7 @@ function op_reset_powerpoint() {
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/User Content.localized/Themes"
 
     cleanupOfficeCommonGroupContainers
-    safeRemove "${TMPDIR}/com.microsoft.Powerpoint"
+    safeRemoveUserTemp "com.microsoft.Powerpoint"
 
     return 0
 }
@@ -1909,7 +1959,7 @@ function op_reset_outlook() {
     local osVersion
     osVersion="$(sw_vers -productVersion)"
 
-    pkill -9 'Microsoft Outlook' 2>/dev/null
+    pkill -9 -x 'Microsoft Outlook' 2>/dev/null
 
     maybeRepairOfficeApp \
         "Microsoft Outlook" \
@@ -1926,7 +1976,6 @@ function op_reset_outlook() {
     fi
 
     safeRemove "/Library/Preferences/com.microsoft.Outlook.plist"
-    safeRemove "/Library/Managed Preferences/com.microsoft.Outlook.plist"
     safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.Outlook.plist"
     safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.Outlook"
     safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.Outlook.CalendarWidget"
@@ -1943,7 +1992,7 @@ function op_reset_outlook() {
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/DRM_Evo.plist"
     cleanupOfficeCommonGroupContainers
 
-    safeRemove "${TMPDIR}/com.microsoft.Outlook"
+    safeRemoveUserTemp "com.microsoft.Outlook"
     safeRemove "/Applications/.Microsoft Outlook.app.installBackup"
 
     ensureLoginKeychainPresent "${loggedInUser}" "${loggedInUserHome}"
@@ -1973,7 +2022,7 @@ function op_reset_outlook() {
 function op_remove_outlook_data() {
     info "Starting operation: remove_outlook_data"
 
-    pkill -9 'Microsoft Outlook' 2>/dev/null
+    pkill -9 -x 'Microsoft Outlook' 2>/dev/null
     safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.Outlook.plist"
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/Outlook"
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/OutlookProfile.plist"
@@ -1986,7 +2035,7 @@ function op_reset_onenote() {
     local osVersion
     osVersion="$(sw_vers -productVersion)"
 
-    pkill -9 'Microsoft OneNote' 2>/dev/null
+    pkill -9 -x 'Microsoft OneNote' 2>/dev/null
 
     maybeRepairOfficeApp \
         "Microsoft OneNote" \
@@ -2003,7 +2052,6 @@ function op_reset_onenote() {
     fi
 
     safeRemove "/Library/Preferences/com.microsoft.onenote.mac.plist"
-    safeRemove "/Library/Managed Preferences/com.microsoft.onenote.mac.plist"
     safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.onenote.mac.plist"
     safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.onenote.mac"
     safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.onenote.mac.shareextension"
@@ -2026,7 +2074,7 @@ function op_reset_onenote() {
 function op_remove_onenote_data() {
     info "Starting operation: remove_onenote_data"
 
-    pkill -9 'Microsoft OneNote' 2>/dev/null
+    pkill -9 -x 'Microsoft OneNote' 2>/dev/null
     safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.onenote.mac"
 
     return 0
@@ -2037,10 +2085,8 @@ function op_reset_onedrive() {
     local osVersion
     osVersion="$(sw_vers -productVersion)"
 
-    pkill -9 'OneDrive' 2>/dev/null
-    pkill -9 'FinderSync' 2>/dev/null
-    pkill -9 'OneDriveStandaloneUpdater' 2>/dev/null
-    pkill -9 'OneDriveUpdater' 2>/dev/null
+    pkill -9 '^OneDrive' 2>/dev/null
+    pkill -9 -f '/Applications/OneDrive\.app/Contents/PlugIns/FinderSync\.appex/' 2>/dev/null
 
     if [[ -d "/Applications/OneDrive.app" ]]; then
         local oneDriveVersion
@@ -2119,12 +2165,10 @@ function op_reset_onedrive() {
     safeRemove "/Library/Preferences/com.microsoft.OneDrive.plist"
     safeRemove "/Library/Preferences/com.microsoft.OneDriveStandaloneUpdater.plist"
     safeRemove "/Library/Preferences/com.microsoft.OneDriveUpdater.plist"
-    safeRemove "/Library/Managed Preferences/com.microsoft.OneDriveStandaloneUpdater.plist"
-    safeRemove "/Library/Managed Preferences/com.microsoft.OneDriveUpdater.plist"
 
-    safeRemove "${TMPDIR}/com.microsoft.OneDrive"
-    safeRemove "${TMPDIR}/com.microsoft.OneDrive.FinderSync"
-    safeRemove "${TMPDIR}/OneDriveVersion.xml"
+    safeRemoveUserTemp "com.microsoft.OneDrive"
+    safeRemoveUserTemp "com.microsoft.OneDrive.FinderSync"
+    safeRemoveUserTemp "OneDriveVersion.xml"
 
     ensureLoginKeychainPresent "${loggedInUser}" "${loggedInUserHome}"
 
@@ -2143,7 +2187,7 @@ function op_reset_onedrive() {
     local keychainDB
     keychainDB="$(findKeychainDB "${loggedInUserHome}")"
     if [[ -n "${keychainDB}" ]]; then
-        /usr/bin/sqlite3 "${keychainDB}" "DELETE FROM genp WHERE agrp='UBF8T346G9.com.microsoft.identity.universalstorage';" >>"${scriptLog}" 2>&1
+        runAsUser "${loggedInUser}" /usr/bin/sqlite3 "${keychainDB}" "DELETE FROM genp WHERE agrp='UBF8T346G9.com.microsoft.identity.universalstorage';" >>"${scriptLog}" 2>&1
     fi
 
     return 0
@@ -2168,13 +2212,8 @@ function resetTeamsOperation() {
     local teamsReplacePath=""    # removed only after the replacement package downloads and verifies
     osVersion="$(sw_vers -productVersion)"
 
-    pkill -9 'MSTeams' 2>/dev/null
-    pkill -9 'Microsoft Teams' 2>/dev/null
-    pkill -9 'Microsoft Teams Helper' 2>/dev/null
-    pkill -9 'Microsoft Teams WebView' 2>/dev/null
-    pkill -9 'Microsoft Teams Launcher' 2>/dev/null
-    pkill -9 'Microsoft Teams (work preview)' 2>/dev/null
-    pkill -9 'Microsoft Teams*' 2>/dev/null
+    pkill -9 -x 'MSTeams' 2>/dev/null
+    pkill -9 '^Microsoft Teams' 2>/dev/null
 
     if [[ -d "${teamsAppPath}" ]]; then
         local currentTeamsVersion
@@ -2212,12 +2251,11 @@ function resetTeamsOperation() {
             ((archiveCounter++))
             teamsBackgroundArchive="${originalArchivePath}${archiveCounter}"
         done
-        # -h: never follow a destination symlink planted after the name check
-        if ! /bin/mv -h "${classicBackgroundsPath}" "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1; then
+        # Rename as the console user (files are already theirs; root never changes ownership); -h: never follow a destination symlink
+        if ! runAsUser "${loggedInUser}" /bin/mv -h "${classicBackgroundsPath}" "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1; then
             errorOut "Unable to archive classic Teams backgrounds; skipping Teams reset to preserve them"
             return 1
         fi
-        /usr/sbin/chown -R "${loggedInUser}" "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1
         if [[ "${operationMode}" != "silent" ]]; then
             runAsUser "${loggedInUser}" /usr/bin/open "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1
         fi
@@ -2226,17 +2264,21 @@ function resetTeamsOperation() {
     if [[ -d "${modernBackgroundsPath}" ]] && ! pathHasTrustedParents "${modernBackgroundsPath}"; then
         warning "Skipping Teams background staging; a parent directory resolves through a symlink: ${modernBackgroundsPath}"
     elif [[ -d "${modernBackgroundsPath}" ]]; then
-        # Root-private staging outside workDirectory so backgrounds survive a failed restore
-        modernBackgroundsStagingRoot="$(mktemp -d "/private/tmp/${scriptName}_Teams_Backgrounds.XXXXXX")"
-        if [[ -n "${modernBackgroundsStagingRoot}" && -d "${modernBackgroundsStagingRoot}" ]]; then
+        # Stage as the console user in their home folder: no root move or ownership change, and a failed restore survives restart
+        local stagingRootPrefix="${loggedInUserHome}/${scriptName}_Teams_Backgrounds."
+        modernBackgroundsStagingRoot="$(runAsUser "${loggedInUser}" /usr/bin/mktemp -d "${stagingRootPrefix}XXXXXX" 2>/dev/null)"
+        if [[ "${modernBackgroundsStagingRoot}" == "${stagingRootPrefix}"[[:alnum:]][[:alnum:]][[:alnum:]][[:alnum:]][[:alnum:]][[:alnum:]] \
+            && -d "${modernBackgroundsStagingRoot}" && ! -L "${modernBackgroundsStagingRoot}" \
+            && "$(stat -f '%u' "${modernBackgroundsStagingRoot}" 2>/dev/null)" == "${loggedInUserID}" ]]; then
             modernBackgroundsStaging="${modernBackgroundsStagingRoot}/Backgrounds"
-            if ! /bin/mv "${modernBackgroundsPath}" "${modernBackgroundsStaging}" >>"${scriptLog}" 2>&1; then
+            if ! runAsUser "${loggedInUser}" /bin/mv -h "${modernBackgroundsPath}" "${modernBackgroundsStaging}" >>"${scriptLog}" 2>&1; then
                 errorOut "Unable to stage Teams backgrounds; skipping Teams reset to preserve them"
-                /bin/rmdir "${modernBackgroundsStagingRoot}" 2>/dev/null
+                runAsUser "${loggedInUser}" /bin/rmdir "${modernBackgroundsStagingRoot}" 2>/dev/null
                 return 1
             fi
         else
-            errorOut "Unable to create private Teams background staging directory; skipping Teams reset to preserve backgrounds"
+            errorOut "Unable to create Teams background staging directory; skipping Teams reset to preserve backgrounds"
+            modernBackgroundsStagingRoot=""
             return 1
         fi
     fi
@@ -2273,17 +2315,15 @@ function resetTeamsOperation() {
     safeRemove "/Library/Application Support/Teams"
 
     safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.teams.plist"
-    safeRemove "/Library/Managed Preferences/com.microsoft.teams.plist"
     safeRemove "/Library/Preferences/com.microsoft.teams.plist"
     safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.teams.helper.plist"
-    safeRemove "/Library/Managed Preferences/com.microsoft.teams.helper.plist"
     safeRemove "/Library/Preferences/com.microsoft.teams.helper.plist"
 
-    safeRemove "${TMPDIR}/com.microsoft.teams"
-    safeRemove "${TMPDIR}/com.microsoft.teams Crashes"
-    safeRemove "${TMPDIR}/Teams"
-    safeRemove "${TMPDIR}/Microsoft Teams Helper (Renderer)"
-    safeRemove "${TMPDIR}/v8-compile-cache-501"
+    safeRemoveUserTemp "com.microsoft.teams"
+    safeRemoveUserTemp "com.microsoft.teams Crashes"
+    safeRemoveUserTemp "Teams"
+    safeRemoveUserTemp "Microsoft Teams Helper (Renderer)"
+    safeRemoveUserTemp "v8-compile-cache-${loggedInUserID}"
 
     safeRemove "/Library/Logs/Microsoft/Teams"
     if ! runAsUser "${loggedInUser}" /usr/bin/tccutil reset All com.microsoft.teams2 >>"${scriptLog}" 2>&1; then
@@ -2301,20 +2341,24 @@ function resetTeamsOperation() {
     deleteGenericByLabel 'com.microsoft.teams.helper.HockeySDK' "${loggedInUser}"
 
     if [[ -n "${modernBackgroundsStaging}" && -d "${modernBackgroundsStaging}" && ! -L "${modernBackgroundsStaging}" ]]; then
-        # Create the container path as the user (MOFA-aligned) so parents are not left root-owned
+        local backgroundsRestored="false"
+        # Create the container path and move backgrounds back as the console user (MOFA-aligned); root never changes ownership
         runAsUser "${loggedInUser}" /bin/mkdir -p "$(dirname "${modernBackgroundsPath}")" >>"${scriptLog}" 2>&1
         if ! pathHasTrustedParents "${modernBackgroundsPath}"; then
             warning "Unable to restore Teams backgrounds; a parent directory resolves through a symlink; retained at ${modernBackgroundsStaging}"
         elif [[ -e "${modernBackgroundsPath}" || -L "${modernBackgroundsPath}" ]]; then
             warning "Unable to restore Teams backgrounds; destination already exists; retained at ${modernBackgroundsStaging}"
-        elif /bin/mv -h "${modernBackgroundsStaging}" "${modernBackgroundsPath}" >>"${scriptLog}" 2>&1; then
-            /usr/sbin/chown -R "${loggedInUser}" "$(dirname "${modernBackgroundsPath}")" >>"${scriptLog}" 2>&1
+        elif runAsUser "${loggedInUser}" /bin/mv -h "${modernBackgroundsStaging}" "${modernBackgroundsPath}" >>"${scriptLog}" 2>&1; then
+            backgroundsRestored="true"
         else
             warning "Unable to restore Teams backgrounds; retained at ${modernBackgroundsStaging}"
         fi
+        if [[ "${backgroundsRestored}" != "true" && "${operationMode}" != "silent" ]]; then
+            runAsUser "${loggedInUser}" /usr/bin/open "${modernBackgroundsStagingRoot}" >>"${scriptLog}" 2>&1
+        fi
     fi
     if [[ -n "${modernBackgroundsStagingRoot}" && -d "${modernBackgroundsStagingRoot}" ]]; then
-        /bin/rmdir "${modernBackgroundsStagingRoot}" 2>/dev/null
+        runAsUser "${loggedInUser}" /bin/rmdir "${modernBackgroundsStagingRoot}" 2>/dev/null
     fi
 
     if [[ -d "${teamsAppPath}" && -z "${teamsReplacePath}" ]]; then
@@ -2375,23 +2419,12 @@ function op_reset_autoupdate() {
     info "Starting operation: reset_autoupdate"
     local mauAppPath="/Library/Application Support/Microsoft/MAU2.0/Microsoft AutoUpdate.app"
 
-    pkill -9 'Microsoft AutoUpdate' 2>/dev/null
-    pkill -9 'Microsoft Update Assistant' 2>/dev/null
-    pkill -9 'Microsoft AU Daemon' 2>/dev/null
-    pkill -9 'Microsoft AU Bootstrapper' 2>/dev/null
-    pkill -9 'com.microsoft.autoupdate.helper' 2>/dev/null
-    pkill -9 'com.microsoft.autoupdate.helpertool' 2>/dev/null
-    pkill -9 'com.microsoft.autoupdate.bootstrapper.helper' 2>/dev/null
+    pkill -9 '^Microsoft (AutoUpdate|Update Assistant|AU )' 2>/dev/null
+    pkill -9 '^com\.microsoft\.autoupdate\.' 2>/dev/null
 
-    launchctl stop /Library/LaunchAgents/com.microsoft.update.agent.plist 2>/dev/null
-    launchctl stop /Library/LaunchAgents/com.microsoft.autoupdate.helper.plist 2>/dev/null
-    launchctl stop /Library/LaunchDaemons/com.microsoft.autoupdate.helper 2>/dev/null
-    launchctl stop /Library/LaunchDaemons/com.microsoft.autoupdate.helper.plist 2>/dev/null
-
-    launchctl unload /Library/LaunchAgents/com.microsoft.update.agent.plist 2>/dev/null
-    launchctl unload /Library/LaunchAgents/com.microsoft.autoupdate.helper.plist 2>/dev/null
-    launchctl unload /Library/LaunchDaemons/com.microsoft.autoupdate.helper 2>/dev/null
-    launchctl unload /Library/LaunchDaemons/com.microsoft.autoupdate.helper.plist 2>/dev/null
+    bootoutLaunchJob "gui/${loggedInUserID}" com.microsoft.update.agent
+    bootoutLaunchJob "gui/${loggedInUserID}" com.microsoft.autoupdate.helper
+    bootoutLaunchJob system com.microsoft.autoupdate.helper
 
     safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.autoupdate2.plist"
     safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.autoupdate.fba.plist"
@@ -2414,11 +2447,11 @@ function op_reset_autoupdate() {
 
     safeRemove "/Library/Application Support/Microsoft/MERP2.0"
 
-    safeRemove "${TMPDIR}/MSauClones"
+    safeRemoveUserTemp "MSauClones"
     safeRemove "/Library/Caches/com.microsoft.autoupdate.helper"
     safeRemove "/Library/Caches/com.microsoft.autoupdate.fba"
-    safeRemove "${TMPDIR}/TelemetryUploadFilecom.microsoft.autoupdate.fba.txt"
-    safeRemove "${TMPDIR}/TelemetryUploadFilecom.microsoft.autoupdate2.txt"
+    safeRemoveUserTemp "TelemetryUploadFilecom.microsoft.autoupdate.fba.txt"
+    safeRemoveUserTemp "TelemetryUploadFilecom.microsoft.autoupdate2.txt"
 
     safeRemove "/Applications/.Microsoft Word.app.installBackup"
     safeRemove "/Applications/.Microsoft Excel.app.installBackup"
@@ -2465,15 +2498,20 @@ function op_reset_autoupdate() {
     registerMAUStaticApplicationIfPresent "/Applications/Microsoft Defender.app" "{ 'Application ID' = 'WDAV00'; LCID = 1033 ; }"
     registerMAUStaticApplicationIfPresent "/Applications/Microsoft Defender ATP.app" "{ 'Application ID' = 'WDAV00'; LCID = 1033 ; }"
 
+    # Reload the MAU jobs booted out above so updates resume before the next login (root-owned plists; already-loaded errors ignored)
+    [[ -f "/Library/LaunchDaemons/com.microsoft.autoupdate.helper.plist" ]] && /bin/launchctl bootstrap system "/Library/LaunchDaemons/com.microsoft.autoupdate.helper.plist" >/dev/null 2>&1
+    [[ -f "/Library/LaunchAgents/com.microsoft.update.agent.plist" ]] && /bin/launchctl bootstrap "gui/${loggedInUserID}" "/Library/LaunchAgents/com.microsoft.update.agent.plist" >/dev/null 2>&1
+    [[ -f "/Library/LaunchAgents/com.microsoft.autoupdate.helper.plist" ]] && /bin/launchctl bootstrap "gui/${loggedInUserID}" "/Library/LaunchAgents/com.microsoft.autoupdate.helper.plist" >/dev/null 2>&1
+
     return 0
 }
 
 function resetOfficeLicenseCore() {
-    pkill -HUP 'Microsoft Word' 2>/dev/null
-    pkill -HUP 'Microsoft Excel' 2>/dev/null
-    pkill -HUP 'Microsoft PowerPoint' 2>/dev/null
-    pkill -HUP 'Microsoft Outlook' 2>/dev/null
-    pkill -HUP 'Microsoft OneNote' 2>/dev/null
+    pkill -HUP -x 'Microsoft Word' 2>/dev/null
+    pkill -HUP -x 'Microsoft Excel' 2>/dev/null
+    pkill -HUP -x 'Microsoft PowerPoint' 2>/dev/null
+    pkill -HUP -x 'Microsoft Outlook' 2>/dev/null
+    pkill -HUP -x 'Microsoft OneNote' 2>/dev/null
 
     ensureLoginKeychainPresent "${loggedInUser}" "${loggedInUserHome}"
 
@@ -2512,7 +2550,7 @@ function resetOfficeLicenseCore() {
     safeRemove "/Library/Application Support/Microsoft/Office365/com.microsoft.Office365V2.plist"
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/com.microsoft.Office365.plist"
     if [[ -f "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/com.microsoft.Office365V2.plist" ]]; then
-        mv "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/com.microsoft.Office365V2.plist" "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/com.microsoft.Office365V2.backup" >>"${scriptLog}" 2>&1
+        runAsUser "${loggedInUser}" /bin/mv -h "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/com.microsoft.Office365V2.plist" "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/com.microsoft.Office365V2.backup" >>"${scriptLog}" 2>&1
     fi
 
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/com.microsoft.e0E2OUQxNUY1LTAxOUQtNDQwNS04QkJELTAxQTI5M0JBOTk4O.plist"
@@ -2572,7 +2610,7 @@ function resetOfficeExtendedSignInArtifacts() {
     local keychainDB
     keychainDB="$(findKeychainDB "${loggedInUserHome}")"
     if [[ -n "${keychainDB}" ]]; then
-        /usr/bin/sqlite3 "${keychainDB}" "DELETE FROM genp WHERE agrp='UBF8T346G9.com.microsoft.identity.universalstorage';" >>"${scriptLog}" 2>&1
+        runAsUser "${loggedInUser}" /usr/bin/sqlite3 "${keychainDB}" "DELETE FROM genp WHERE agrp='UBF8T346G9.com.microsoft.identity.universalstorage';" >>"${scriptLog}" 2>&1
     fi
 
     safeRemove "${loggedInUserHome}/Library/Keychains/Microsoft_Entity_Certificates-db"
@@ -2580,7 +2618,9 @@ function resetOfficeExtendedSignInArtifacts() {
 }
 
 function finalizeOfficeCredentialReset() {
-    /usr/bin/killall cfprefsd >>"${scriptLog}" 2>&1
+    # Flush cached preferences for the console user and root only; other logged-in users' sessions are left alone
+    /usr/bin/killall -u "${loggedInUser}" cfprefsd >>"${scriptLog}" 2>&1
+    /usr/bin/killall -u root cfprefsd >>"${scriptLog}" 2>&1
     return 0
 }
 
@@ -2608,7 +2648,7 @@ function op_remove_office() {
 function op_remove_skypeforbusiness() {
     info "Starting operation: remove_skypeforbusiness"
 
-    pkill -9 'Skype for Business' 2>/dev/null
+    pkill -9 -x 'Skype for Business' 2>/dev/null
 
     safeRemove "${loggedInUserHome}/Library/Application Scripts/com.microsoft.SkypeForBusiness"
     safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.SkypeForBusiness"
@@ -2638,7 +2678,7 @@ function op_remove_defender() {
     local defenderUninstaller="${defenderAppPath}/Contents/Resources/Tools/uninstall/uninstall"
     local defenderStatus=0
 
-    pkill -9 'Microsoft Defender*' 2>/dev/null
+    pkill -9 '^Microsoft Defender' 2>/dev/null
 
     if [[ -e "${defenderUninstaller}" ]]; then
         "${defenderUninstaller}" >>"${scriptLog}" 2>&1
@@ -2719,10 +2759,7 @@ function op_remove_zoomplugin() {
 
     /Applications/ZoomOutlookPlugin/Uninstall/Contents/MacOS/Uninstall >>"${scriptLog}" 2>&1
 
-    launchctl stop /Library/LaunchAgents/us.zoom.pluginagent.plist 2>/dev/null
-    launchctl unload /Library/LaunchAgents/us.zoom.pluginagent.plist 2>/dev/null
-    launchctl stop "${loggedInUserHome}/Library/LaunchAgents/us.zoom.pluginagent.plist" 2>/dev/null
-    launchctl unload "${loggedInUserHome}/Library/LaunchAgents/us.zoom.pluginagent.plist" 2>/dev/null
+    bootoutLaunchJob "gui/${loggedInUserID}" us.zoom.pluginagent
 
     safeRemove "/Library/LaunchAgents/us.zoom.pluginagent.plist"
     safeRemove "${loggedInUserHome}/Library/LaunchAgents/us.zoom.pluginagent.plist"
@@ -2746,8 +2783,7 @@ function op_remove_webexpt() {
 
     /Applications/WebEx\ Productivity\ Tools/Uninstall/Contents/MacOS/Uninstall >>"${scriptLog}" 2>&1
 
-    launchctl stop /Library/LaunchAgents/com.webex.pluginagent.plist 2>/dev/null
-    launchctl unload /Library/LaunchAgents/com.webex.pluginagent.plist 2>/dev/null
+    bootoutLaunchJob "gui/${loggedInUserID}" com.webex.pluginagent
 
     safeRemove "${loggedInUserHome}/Library/Application Support/Cisco/Webex Plugin"
     safeRemove "${loggedInUserHome}/Library/Application Support/Cisco/Webex Meetings"
@@ -2859,6 +2895,19 @@ function preflightChecks() {
 
     preFlight "Running as root; user: ${loggedInUserFullname} (${loggedInUser}) [${loggedInUserID}]; home: ${loggedInUserHome}"
 
+    # Per-user temp folder for cache cleanup; accepted only when it is the user's own folder under /var/folders
+    local userTempDirectory
+    userTempDirectory="$(runAsUser "${loggedInUser}" /usr/bin/getconf DARWIN_USER_TEMP_DIR 2>/dev/null)"
+    userTempDirectory="${userTempDirectory%/}"
+    if [[ "${userTempDirectory}" == (/private|)/var/folders/* && "${userTempDirectory}" != *$'\n'* && "${userTempDirectory}" != *..* ]] \
+        && [[ -d "${userTempDirectory}" && ! -L "${userTempDirectory}" ]] \
+        && [[ "$(stat -f '%u' "${userTempDirectory}" 2>/dev/null)" == "${loggedInUserID}" ]]; then
+        loggedInUserTempDirectory="${userTempDirectory}"
+        preFlight "User temp folder: ${loggedInUserTempDirectory}"
+    else
+        preFlight "Unable to resolve a trusted temp folder for ${loggedInUser}; skipping per-user temp cleanup"
+    fi
+
     if [[ "${operationMode}" == "self-service" && "${allowAllOperations}" != "true" ]] && operationCSVIsEmpty; then
         fatal "No --operations / \$5 allowlist supplied in self-service mode; supply an allowlist, or pass --allow-all-operations / set \$6 to true for admin-only policies"
     fi
@@ -2916,6 +2965,7 @@ function main() {
 
     local total="${#resolvedOperations[@]}"
     local index=0
+    local preinstallRemovalFailures="0"
 
     if isOperationSelected remove_office; then
         ((total++))
@@ -2923,6 +2973,7 @@ function main() {
         updateProgressDialog "${index}" "${total}" "Running remove_office preinstall (${index}/${total})"
 
         info "Executing remove_office preinstall phase"
+        removalFailures="0"
         if ! removeOfficePreinstall; then
             appendFailure remove_office
             errorOut "remove_office preinstall phase failed"
@@ -2938,17 +2989,27 @@ function main() {
             exit 20
         fi
 
+        preinstallRemovalFailures="${removalFailures}"
         updateCompletedProgressDialog "${index}" "${total}" "Completed remove_office preinstall (${index}/${total})"
     fi
 
     local op
+    local operationRC
     for op in "${resolvedOperations[@]}"; do
         ((index++))
         updateProgressDialog "${index}" "${total}" "Running ${op} (${index}/${total})"
 
-        if runOperation "${op}"; then
+        # Paths an operation could not remove fail that operation (remove_office also carries its preinstall removals)
+        removalFailures="0"
+        [[ "${op}" == "remove_office" ]] && removalFailures="${preinstallRemovalFailures}"
+        runOperation "${op}"
+        operationRC=$?
+        if [[ ${operationRC} -eq 0 && ${removalFailures} -eq 0 ]]; then
             appendCompletion "${op}"
             info "Operation succeeded: ${op}"
+        elif [[ ${operationRC} -eq 0 ]]; then
+            appendFailure "${op}"
+            errorOut "Operation failed: ${op} (${removalFailures} path(s) not removed)"
         else
             appendFailure "${op}"
             errorOut "Operation failed: ${op}"

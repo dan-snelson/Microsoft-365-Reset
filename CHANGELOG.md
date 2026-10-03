@@ -2,6 +2,26 @@
 
 ## Changelog
 
+### Version 2.0.1 (03-Oct-2026)
+- Addressed findings from a third Monocle security review
+    - :warning: **Breaking Change:** :warning: An operation now fails (exit `20`) when any path it should remove is not removed (for example, a root-owned folder left in the console user's home folder, or a removal blocked by macOS privacy protections); previously these logged a `WARNING` and the operation reported success. Per-user temp-folder cleanup and private staging cleanup stay best-effort. Grant your management agent Full Disk Access via a PPPC profile
+    - `reset_teams` / `reset_teams_force`: Teams background archive, staging, and restore now run as the console user and no longer change file ownership; current Teams backgrounds are staged in a `M365R_Teams_Backgrounds.*` folder in the user's home folder (instead of `/private/tmp`), so backgrounds kept after a failed restore survive a restart and are opened for the user in interactive modes
+    - Reset operations (`reset_factory`, `reset_word`, `reset_excel`, `reset_powerpoint`, `reset_outlook`, `reset_onenote`, `reset_onedrive`, `reset_teams`, `reset_teams_force`) no longer delete profile-delivered `/Library/Managed Preferences` files; only `remove_office` removes them
+    - Microsoft package verification now requires `pkgutil --check-signature` to succeed and report an Apple-issued distribution certificate before comparing the Microsoft signer
+    - Custom MAU channels now also require an `https://` `FullUpdaterLocation`; non-HTTPS values are ignored with a `WARNING` and the standard Microsoft download is used
+    - The Microsoft identity keychain-database cleanup (`reset_onedrive`, `reset_credentials`) and the `com.microsoft.Office365V2.plist` rename (`reset_license`, `reset_credentials`) now run as the console user
+    - Auto-repair now moves a damaged or version-mismatched app aside (instead of deleting it) after the replacement package verifies, and restores it when the install fails or leaves nothing in place
+- Reliability fixes
+    - Per-app caches in the console user's temp folder are now cleaned as the console user; earlier releases targeted root's temp folder, so these removals did nothing
+    - Force-quit now uses exact process names or anchored prefixes (for example, `^Microsoft Teams` and `^OneDrive`), so other vendors' Finder extensions and the Teams audio driver host are no longer matched by substring; OneDrive's Finder extension is matched by its bundle path, and `OneDrive Sync Service` is now included
+    - Microsoft, Zoom, and WebEx launchd jobs are stopped with `launchctl bootout` by label in the console user's GUI domain or the system domain (previously `launchctl stop` with a plist path, which did nothing); `reset_autoupdate` reloads the MAU agent and daemon afterward
+    - `reset_license` / `reset_credentials` restart `cfprefsd` only for the console user and root, not for other logged-in users
+    - Home-folder lookup now prefers directory services over a `/Users/<shortname>` guess when `dscl` cannot return the path
+- Internal
+    - Pinned the Semgrep CLI in `.github/workflows/security-scan.yml` to `1.179.0` (previously the latest release via `--upgrade`)
+    - `scripts/mofa-consult.zsh` writes its report to the per-user `$TMPDIR` by default (instead of a fixed `/var/tmp` path), refuses a symlinked `--output` path, no longer pushes your MOFA fork by default (pass `--push-origin`), and updates the `reset_factory` and `reset_teams` parity notes
+    - `AGENTS.md` and `.github` instructions: never run `chown -R` as root on a tree the console user can write; console-user data may be staged in the home folder only as the console user; damaged apps are moved aside and restored on a failed install; exit `20` includes paths an operation could not remove
+
 ### Version 2.0.0 (30-Sep-2026)
 - Addressed critical findings from a second Monocle security review
     - :warning: **Breaking Change:** :warning: `self-service` mode now exits `10` during preflight when no `--operations` / `$5` allowlist is supplied; pass `--allow-all-operations` or set Parameter `$6` to `true` for deliberately broad, admin-only policies (`test` and `debug` keep the logged `WARNING`)

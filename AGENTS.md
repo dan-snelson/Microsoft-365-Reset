@@ -136,14 +136,16 @@ Script runs as root; keep these guardrails intact in `Microsoft-365-Reset.zsh` a
 
 - Keep `PATH` pinned to `/usr/bin:/bin:/usr/sbin:/sbin`; do not re-add `/usr/local/bin`.
 - Invoke swiftDialog only through validated `"${dialogBinary}"` set by `dialogTrustCheck` (root-owned, not group/other-writable, Team ID `PWA5E9TQ59`), never bare `dialog`.
-- Stage downloads and temporary files in root-private `mktemp -d` directories (for example under `"${workDirectory}"`), never fixed `/tmp`, `/Users/Shared`, or other user-writable paths.
+- Stage downloads and temporary files in root-private `mktemp -d` directories (for example under `"${workDirectory}"`), never fixed `/tmp`, `/Users/Shared`, or other user-writable paths. Exception: the console user's own data (for example, Teams backgrounds) may be staged in their home folder only when created and moved as the console user.
+- Never run `chown -R` (or other ownership or permission changes) as root on a tree the console user can write; move or rename user-owned data as the console user instead.
 - Verify regular-file type and root ownership before passing staged packages to `installer`.
 - Keep swiftDialog command file root-owned; do not `chown` it to the console user.
 - Run console-user commands through `runAsUser` (once, in the user's session); no retry fallbacks under plain `sudo -u`.
-- Remove paths through `safeRemove` instead of bare `rm -rf`.
+- Remove paths through `safeRemove` instead of bare `rm -rf`; use `safeRemoveBestEffort` / `safeRemoveUserTemp` only where a failed removal must not fail the operation.
 - Add `setopt localoptions noxtrace` to helpers handling keychain items, package installs, or other sensitive data so `debug` traces stay safe.
 - Route keychain deletions through `runKeychainDelete`; never redirect `security` output into `"${scriptLog}"` (it echoes deleted item attributes).
-- Remove damaged or version-mismatched apps only after replacement package downloads and passes verification.
+- Move damaged or version-mismatched apps aside (root-private, outside `"${workDirectory}"`) only after the replacement package downloads and passes verification; restore the original bundle when the install fails.
+
 ## Mode Expectations
 
 - `self-service` is the primary guided user flow; empty `--operations` / `$5` allowlist exits `10` during preflight unless `--allow-all-operations` / `$6` is `true`.
@@ -156,7 +158,7 @@ Script runs as root; keep these guardrails intact in `Microsoft-365-Reset.zsh` a
 - `0`: success, including intentional user cancellation in interactive modes
 - `2`: no operations in `silent` mode, or destructive confirmation not acknowledged
 - `10`: preflight / validation failure, including empty `self-service` allowlist without `--allow-all-operations` / `$6`
-- `20`: one or more operations failed
+- `20`: one or more operations failed, including any path an operation could not remove
 
 ## Quality Bar
 

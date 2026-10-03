@@ -8,8 +8,8 @@ This tool runs with **`root` privileges** and can perform destructive operations
 
 Only the **latest release** is actively supported for security updates.
 
-- Current stable: [v2.0.0](https://github.com/dan-snelson/Microsoft-365-Reset/releases) (and newer)
-- Older releases, including `1.x` and the `2.0.0` betas, receive no security patches.
+- Current stable: [v2.0.1](https://github.com/dan-snelson/Microsoft-365-Reset/releases) (and newer)
+- Older releases, including `2.0.0`, `1.x`, and the `2.0.0` betas, receive no security patches; upgrade to the current release.
 
 We strongly recommend always using the latest version, especially in Jamf Pro Self Service or MDM deployments.
 
@@ -41,7 +41,7 @@ We will work with you to understand, reproduce, and fix the issue, then coordina
 - In `self-service` mode, always supply an `--operations` / Parameter `$5` allowlist; an empty allowlist exits `10` during preflight unless `--allow-all-operations` / Parameter `$6` is `true` (reserve that for deliberately broad, admin-only policies).
 - In `silent` mode, double-check your `--operations` or Parameter `$5` list — there is no UI confirmation.
 - `test` mode is **not** a dry run; it performs real operations.
-- Microsoft packages are verified with `pkgutil --check-signature` and content-length checks during auto-repair, and a damaged or version-mismatched app is removed only after its replacement passes verification.
+- Microsoft packages must pass `pkgutil --check-signature` (exit status, an Apple-issued distribution certificate, and the Microsoft signer) and content-length checks during auto-repair; a damaged or version-mismatched app is moved aside only after its replacement passes verification, and is restored if the install fails.
 - Root path trust guardrails:
     - `PATH` is pinned to `/usr/bin:/bin:/usr/sbin:/sbin`
     - swiftDialog must be root-owned, not group/other-writable, and signed by Team ID `PWA5E9TQ59`
@@ -49,6 +49,8 @@ We will work with you to understand, reproduce, and fix the issue, then coordina
     - The swiftDialog command file stays root-owned
     - Keychain deletions discard `security` output and log only the item label, service, or creator, so deleted account and identity attributes never reach the client log
     - Removals under the console user's home folder are refused when a parent directory resolves through a symlink, and run as the console user (never root), so a symlink swapped in after the check cannot redirect the deletion
+    - Moves, renames, and keychain-database edits of the console user's own data (including Teams backgrounds) run as the console user; root never changes ownership of files under the home folder
+    - Custom MAU manifest URLs (`ManifestServer` and `FullUpdaterLocation`) must use `https://`
 - Run only from trusted sources (official GitHub releases or your own signed packages).
 - Consider wrapping the script in a Jamf Pro policy with scoped Smart Groups and clear end-user communication.
 
@@ -80,4 +82,4 @@ Grateful for the Mac Admins community that keeps us all safer.
 
 — Dan K. Snelson  
 
-Last updated: 30-Sep-2026
+Last updated: 03-Oct-2026

@@ -25,8 +25,8 @@ applyTo: "Microsoft-365-Reset.zsh"
 - Avoid hidden behavior changes during refactors.
 - Keep the `self-service` allowlist gate intact: an empty `--operations` / `$5` exits `10` during preflight unless `--allow-all-operations` / `$6` is set; `test` and `debug` only log a `WARNING`.
 - Keep destructive operations (`remove_office`, `remove_outlook_data`, `remove_onenote_data`, `remove_defender`) behind the interactive destructive-action confirmation.
-- Keep exit codes predictable: `0` success or user cancellation, `2` no `silent` operations or unacknowledged destructive confirmation, `10` preflight or validation failure, `20` one or more operations failed.
-- Remove damaged or version-mismatched apps only after the replacement package downloads and passes verification.
+- Keep exit codes predictable: `0` success or user cancellation, `2` no `silent` operations or unacknowledged destructive confirmation, `10` preflight or validation failure, `20` one or more operations failed (including a path an operation could not remove).
+- Move damaged or version-mismatched apps aside only after the replacement package downloads and passes verification, and restore the original bundle when the install fails.
 
 ## 3. Implementation Rules
 

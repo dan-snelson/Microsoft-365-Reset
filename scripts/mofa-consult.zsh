@@ -14,9 +14,10 @@ setopt PIPE_FAIL
 autoload -Uz is-at-least
 
 scriptName="mofa-consult"
-scriptVersion="2.0.0"
+scriptVersion="2.0.1"
 defaultMofaRepo="../MOFA"
-defaultOutputPath="/var/tmp/M365R-MOFA-report.md"
+# Per-user private temp folder (macOS TMPDIR), not a fixed shared path
+defaultOutputPath="${${TMPDIR:-${HOME}/Library/Caches}%/}/M365R-MOFA-report.md"
 upstreamURL="https://github.com/cocopuff2u/MOFA.git"
 
 scriptDirectory="$(cd "$(dirname "$0")" && pwd)"
@@ -30,7 +31,7 @@ mofaRepoPath="${defaultMofaRepo}"
 outputPath="${defaultOutputPath}"
 runSync="true"
 runReport="true"
-pushOrigin="true"
+pushOrigin="false"
 
 typeset -a candidateItems
 typeset -a intentionalItems
@@ -42,11 +43,12 @@ function usage() {
 Usage: ./scripts/mofa-consult.zsh [options]
 
 Options:
-  --sync-only            Sync ../MOFA and skip report generation (pushes origin/main by default)
+  --sync-only            Sync ../MOFA and skip report generation
   --report-only          Generate the report from the local MOFA checkout without syncing
   --mofa-repo PATH       Override the default sibling MOFA checkout path (${defaultMofaRepo})
   --output PATH          Override the default report path (${defaultOutputPath})
-  --no-push-origin       Skip the default origin/main push during sync
+  --push-origin          Push synced MOFA main to origin/main (your fork) during sync
+  --no-push-origin       Skip the origin/main push during sync (default)
   --help                 Show this help text
 EOF
 }
@@ -377,7 +379,7 @@ function syncMofaRepo() {
         info "Pushing synced MOFA main to origin/main"
         git -C "${mofaRepoPath}" push origin main:main || dieSync "Unable to push synced MOFA main to origin/main"
     else
-        info "Skipping origin push by request"
+        info "Skipping origin push (pass --push-origin to update your fork)"
     fi
 }
 
@@ -448,8 +450,8 @@ function buildScriptCoverageSection() {
     coveredNoteForOperation[reset_onenote]="Current MOFA repair flow exits without removing configuration data after repair; local deferred cleanup matches that behavior."
     coveredNoteForOperation[remove_office]="Removes only the Office-owned children of /Library/Application Support/Microsoft (MAU2.0, MERP2.0, Office365) and keeps the Defender (com.microsoft.wdav) package receipt, matching current MOFA Office Removal."
 
-    intentionalNoteForOperation[reset_factory]="README parity note: reset_factory directly performs MOFA-aligned suite cleanup and intentionally adds package-era dependency expansion."
-    intentionalNoteForOperation[reset_teams]="README parity note: reset_teams suppresses Screen Recording UI in silent mode, preserves legacy Teams bundles during a standard reset, does not install Teams when the main bundle is absent, and stops before cleanup when backgrounds cannot be moved to the archive or staging (backgrounds under a symlinked parent are skipped with a warning and cleanup continues). Background preservation (destination folders created in the console user's context) and TCC reset remain MOFA-aligned."
+    intentionalNoteForOperation[reset_factory]="README parity note: reset_factory directly performs MOFA-aligned suite cleanup and intentionally adds package-era dependency expansion; it leaves /Library/Managed Preferences to MDM (only remove_office removes them)."
+    intentionalNoteForOperation[reset_teams]="README parity note: reset_teams suppresses Screen Recording UI in silent mode, preserves legacy Teams bundles during a standard reset, does not install Teams when the main bundle is absent, and stops before cleanup when backgrounds cannot be moved to the archive or staging (backgrounds under a symlinked parent are skipped with a warning and cleanup continues). Backgrounds are archived, staged in the console user's home folder, and restored as the console user without ownership changes. Background preservation (destination folders created in the console user's context) and TCC reset remain MOFA-aligned."
     intentionalNoteForOperation[reset_autoupdate]="README parity note: AutoUpdate registration treats new Teams as TEAMS21 while keeping classic Teams on the legacy product ID."
 
     localOnlyReason[reset_teams_force]="Repo-local operation ID exposing the force-reinstall behavior available through MOFA Teams reset's INSTALL=force argument; no separate MOFA script exists."
@@ -700,6 +702,7 @@ function writeReport() {
     outputDirectory="$(dirname "${outputPath}")"
     mkdir -p "${outputDirectory}" 2>/dev/null || dieReport "Unable to create report directory: ${outputDirectory}"
 
+    [[ -L "${outputPath}" ]] && dieReport "Refusing to write report output through a symlink: ${outputPath}"
     : > "${outputPath}" 2>/dev/null || dieReport "Unable to write report output: ${outputPath}"
 
     {
@@ -804,6 +807,10 @@ while [[ $# -gt 0 ]]; do
             [[ -n "${2:-}" ]] || dieUsage "Missing value for --output"
             outputPath="${2}"
             shift 2
+            ;;
+        --push-origin)
+            pushOrigin="true"
+            shift
             ;;
         --no-push-origin)
             pushOrigin="false"
