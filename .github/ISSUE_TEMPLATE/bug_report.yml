@@ -115,7 +115,7 @@ body:
         - "`0` (success or user cancellation)"
         - "`2` (no silent operations or destructive confirmation not acknowledged)"
         - "`10` (preflight or validation failure)"
-        - "`20` (one or more operations failed)"
+        - "`20` (one or more operations failed, including a path an operation could not remove)"
         - Other
         - Not sure
 

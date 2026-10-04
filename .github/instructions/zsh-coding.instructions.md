@@ -37,7 +37,8 @@ applyTo: "**/*.zsh"
 
 - Keep `PATH` pinned to `/usr/bin:/bin:/usr/sbin:/sbin`; do not re-add `/usr/local/bin`.
 - Invoke swiftDialog only through the validated `"${dialogBinary}"` path set by `dialogTrustCheck`, never bare `dialog`.
-- Stage downloads and temporary files in root-private `mktemp -d` directories (for example under `"${workDirectory}"`), never in fixed `/tmp`, `/Users/Shared`, or other user-writable paths.
+- Stage downloads and temporary files in root-private `mktemp -d` directories (for example under `"${workDirectory}"`), never in fixed `/tmp`, `/Users/Shared`, or other user-writable paths. Exception: the console user's own data may be staged in their home folder only when created and moved as the console user.
+- Never run `chown -R` (or other ownership or permission changes) as root on a tree the console user can write; move or rename user-owned data as the console user instead.
 - Verify regular-file type and root ownership before passing staged packages to `installer`.
 - Keep the swiftDialog command file root-owned; do not `chown` it to the console user.
 - Run console-user commands through `runAsUser` (once, in the user's session); do not add retry fallbacks that re-run under plain `sudo -u`.

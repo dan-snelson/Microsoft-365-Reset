@@ -1,6 +1,6 @@
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/dan-snelson/Microsoft-365-Reset?display_name=tag) ![GitHub issues](https://img.shields.io/github/issues-raw/dan-snelson/Microsoft-365-Reset) ![GitHub closed issues](https://img.shields.io/github/issues-closed-raw/dan-snelson/Microsoft-365-Reset) ![GitHub pull requests](https://img.shields.io/github/issues-pr-raw/dan-snelson/Microsoft-365-Reset) ![GitHub closed pull requests](https://img.shields.io/github/issues-pr-closed-raw/dan-snelson/Microsoft-365-Reset) [![swiftDialog](https://img.shields.io/badge/swiftDialog-Enabled-blue)](https://swiftdialog.app) [![Semgrep Security Scan](https://img.shields.io/badge/security%20scanned%20by-Semgrep-00C7B7?style=flat&logo=semgrep&logoColor=white)](https://semgrep.dev)
 
-# Microsoft 365 Reset (2.0.0)
+# Microsoft 365 Reset (2.0.1)
 
 <img src="images/Microsoft_365_Reset_Hero.jpg" alt="Microsoft 365 Reset" width="600" />
 
@@ -47,8 +47,8 @@ The script consolidates expanded package workflows into one root-run tool with:
 
 Intentional divergences from current MOFA behavior:
 
-- `reset_factory` directly performs MOFA-aligned suite cleanup and intentionally adds package-era dependency expansion
-- `reset_teams` suppresses Screen Recording settings in `silent` mode, preserves classic and work-or-school Teams bundles during a standard reset, does not install current Teams when its main app bundle is absent, and stops before cleanup when Teams backgrounds cannot be archived or staged (backgrounds under a symlinked parent directory are skipped with a `WARNING` and cleanup continues)
+- `reset_factory` directly performs MOFA-aligned suite cleanup and intentionally adds package-era dependency expansion; it leaves profile-delivered `/Library/Managed Preferences` files in place (no reset operation removes them; only `remove_office` does)
+- `reset_teams` suppresses Screen Recording settings in `silent` mode, preserves classic and work-or-school Teams bundles during a standard reset, does not install current Teams when its main app bundle is absent, and stops before cleanup when Teams backgrounds cannot be archived or staged (backgrounds under a symlinked parent directory are skipped with a `WARNING` and cleanup continues); backgrounds are archived, staged in the console user's home folder, and restored as the console user instead of in a fixed `/tmp` path
 - AutoUpdate registration treats new Teams as the current `TEAMS21` product while keeping classic Teams on the legacy product ID
 
 Repo-local operations without current MOFA community-script equivalents:
@@ -82,6 +82,7 @@ Repo-local operations without current MOFA community-script equivalents:
 - Active non-root console user session (script exits during preflight if none is detected)
 - Network access for swiftDialog install/upgrade in interactive modes and Microsoft package download during auto-repair operations
 - Built-in tools used by the script (`security`, `defaults`, `pkgutil`, `installer`, `codesign`, `sqlite3`, `nscurl`, etc.)
+- Full Disk Access for your management agent (for example, the Jamf Pro binary via a PPPC profile) so macOS privacy protections do not block cleanup inside app containers; any path an operation cannot remove fails that operation (exit `20`)
 - In interactive modes, swiftDialog must resolve from `/usr/local/bin/dialog` into `/Library/Application Support/Dialog/Dialog.app/Contents/MacOS/`, be root-owned and not group/other-writable, and be signed by Team ID `PWA5E9TQ59`; otherwise the script reinstalls swiftDialog once, then exits `10` if validation still fails
 
 Important:
@@ -240,14 +241,18 @@ Repair pipeline includes:
 - regular-file and root-ownership check on the downloaded package
 - content-length sanity check
 - Microsoft signature verification
-- removal of a damaged or version-mismatched app bundle only after the replacement package has downloaded and verified
+- a damaged or version-mismatched app bundle is moved aside (root-private, outside the run directory) only after the replacement package has downloaded and verified
 - `installer -pkg ... -target /`
+- for Teams, OneDrive, and MAU, the new bundle must pass `codesign -vv --deep` before the original is released
+- the original bundle is restored when the install fails, leaves nothing at the original path, or (Teams, OneDrive, and MAU) fails codesign; otherwise it is discarded
 
-When MAU is on a `Custom` channel, the `ManifestServer` preference must use `https://`; otherwise it is ignored with a `WARNING` and the standard Microsoft download is used.
+When MAU is on a `Custom` channel, the `ManifestServer` preference and the manifest's `FullUpdaterLocation` must use `https://`; otherwise each is ignored with a `WARNING` and the standard Microsoft download is used.
+
+Microsoft packages must pass `pkgutil --check-signature` (exit status and an Apple-issued distribution certificate) and be signed by `Microsoft Corporation (UBF8T346G9)`.
 
 When an app's version cannot be read, the script does not assume the legacy 2016 generation and skips version-based reinstalls; the code-signature check decides whether a reinstall is needed.
 
-Teams reinstalls retry a failed package download up to five times; a damaged or outdated Teams bundle stays in place until a replacement package verifies.
+Teams reinstalls retry a failed package download up to five times; a damaged or outdated Teams bundle stays in place until a replacement package verifies, and is restored if that install fails.
 
 For `reset_word`, `reset_excel`, `reset_powerpoint`, `reset_outlook`, and `reset_onenote`, a run performs repair/reinstall or configuration cleanup, not both. When one of those apps is repaired, cleanup is deferred to a later run. Because `reset_factory` expands to those operations, it inherits the same behavior for those app-specific resets.
 
@@ -313,7 +318,7 @@ For repo maintenance, `scripts/mofa-consult.zsh` can sync a sibling `../MOFA` ch
 
 MOFA is the primary behavior baseline for this repo. Use the package-era reference as secondary context for retained chooser logic, dependency history, and operations that do not have a current MOFA community-script equivalent. If this repo intentionally keeps package-era behavior instead of MOFA behavior, treat that as a documented divergence that needs a defensible reason.
 
-By default, the sync step fast-forwards the sibling MOFA checkout's local `main` branch to `upstream/main` and pushes `origin/main` to keep your fork current. Use `--no-push-origin` to skip the fork push.
+By default, the sync step fast-forwards the sibling MOFA checkout's local `main` branch to `upstream/main` without pushing. Use `--push-origin` to also push `origin/main` and keep your fork current. Reports are written to your per-user temp folder (`$TMPDIR`) by default, and the helper refuses to write through a symlinked `--output` path.
 
 Default sync + report:
 
@@ -328,13 +333,13 @@ The package-era comparison is optional. When `Resources/Microsoft_Office_Reset_2
 Generate a report from the current local MOFA checkout without syncing:
 
 ```bash
-./scripts/mofa-consult.zsh --report-only --mofa-repo ../MOFA --output /var/tmp/M365R-MOFA-report.md
+./scripts/mofa-consult.zsh --report-only --mofa-repo ../MOFA --output "${TMPDIR}M365R-MOFA-report.md"
 ```
 
-Sync local `main` from `upstream/main` without pushing your fork:
+Sync local `main` from `upstream/main` and push your fork:
 
 ```bash
-./scripts/mofa-consult.zsh --sync-only --no-push-origin
+./scripts/mofa-consult.zsh --sync-only --push-origin
 ```
 
 The report uses `Covered`, `Candidate inclusion`, `Intentional divergence`, `Local-only operation`, and `Skipped` classifications, and compares:
@@ -355,12 +360,12 @@ Local operation coverage requires the operation ID, implementation function, dis
 | `0` | Success, including intentional user cancellation in interactive modes |
 | `2` | No operations provided in `silent` mode or destructive confirmation was not acknowledged |
 | `10` | Preflight/validation failure, including an empty `self-service` allowlist without `--allow-all-operations` / `$6` |
-| `20` | One or more operations failed |
+| `20` | One or more operations failed, including any path an operation could not remove |
 
 Every run that reaches preflight ends with a `NOTICE` log line summarizing succeeded and failed operation counts, failed operation IDs, elapsed time, and the exit code, so `silent` runs are auditable without the completion dialog:
 
 ```text
-M365R (2.0.0): 2026-09-30 10:34:46  [NOTICE] Exiting: 9 succeeded, 1 failed (reset_teams); Elapsed Time: 0h:1m:12s; exit code 20
+M365R (2.0.1): 2026-10-03 10:34:46  [NOTICE] Exiting: 9 succeeded, 1 failed (reset_teams); Elapsed Time: 0h:1m:12s; exit code 20
 ```
 
 ## Validation
@@ -379,8 +384,10 @@ zsh -n ./Microsoft-365-Reset.zsh
 - Reset operations force-quit Microsoft apps; ask users to save their work first, especially for `silent` runs.
 - `reset_credentials` and `reset_factory` delete keychain sign-in items; users must sign in again.
 - Removals under the console user's home folder are refused when a parent directory resolves through a symlink, so a user-planted link cannot redirect a root deletion outside the home folder; refusals are logged as `WARNING` lines.
-- Removals under the console user's home folder run as the console user, not root; root-owned folders left in the home folder (for example, by older tools) are not removed and are logged as `WARNING` lines.
+- Removals under the console user's home folder and per-user temp folder run as the console user, not root; root-owned folders left in the home folder (for example, by older tools) are not removed, are logged as `WARNING` lines, and fail the operation (exit `20`). Per-user temp-folder cleanup is best-effort and never fails an operation.
+- Reset operations leave profile-delivered `/Library/Managed Preferences` files to your MDM; only `remove_office` removes them.
 - `reset_teams` / `reset_teams_force` fail (exit `20`) before removing Teams data when moving Teams backgrounds to the archive or staging fails, so a failed preservation step never deletes them; backgrounds under a symlinked parent directory are skipped with a `WARNING` and cleanup continues.
+- Teams backgrounds are archived, staged, and restored as the console user; if a restore fails, they stay in a `M365R_Teams_Backgrounds.*` folder in the user's home folder (opened for the user in interactive modes) and survive a restart.
 - Constrain each Self Service policy with `--operations` / `$5`. Reserve `--allow-all-operations` / `$6` for admin-only policies, and exclude `remove_defender` unless your security team approves.
 - `test` mode is not a dry run.
 - Recovery: apps can be reinstalled, and MAU, Teams, and OneDrive state rebuilds itself; deleted local mail, unsynced OneNote content, keychain items, removed Defender, and deleted logs cannot be recovered without backups or reinstallation.

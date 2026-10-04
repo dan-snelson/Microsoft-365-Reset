@@ -57,7 +57,8 @@ jobs:
 
       - name: Install Semgrep CLI
         # The archived action does not emit SARIF for GitHub code scanning, so install the CLI explicitly.
-        run: python3 -m pip install --upgrade semgrep
+        # Pinned like the Actions above; bump deliberately (hash pinning is impractical across Semgrep's transitive dependencies).
+        run: python3 -m pip install "semgrep==1.179.0"
 
       - name: Generate Semgrep SARIF
         id: semgrep_sarif
