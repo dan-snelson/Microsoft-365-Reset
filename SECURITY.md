@@ -9,6 +9,7 @@ This tool runs with **`root` privileges** and can perform destructive operations
 Only the **latest release** is actively supported for security updates.
 
 - Current stable: [v2.0.1](https://github.com/dan-snelson/Microsoft-365-Reset/releases) (and newer)
+- Current beta: `3.0.0b2` (for lab testing only; not for production deployment)
 - Older releases, including `2.0.0`, `1.x`, and the `2.0.0` betas, receive no security patches; upgrade to the current release.
 
 We strongly recommend always using the latest version, especially in Jamf Pro Self Service or MDM deployments.

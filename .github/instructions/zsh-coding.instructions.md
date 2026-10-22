@@ -42,6 +42,7 @@ applyTo: "**/*.zsh"
 - Verify regular-file type and root ownership before passing staged packages to `installer`.
 - Keep the swiftDialog command file root-owned; do not `chown` it to the console user.
 - Run console-user commands through `runAsUser` (once, in the user's session); do not add retry fallbacks that re-run under plain `sudo -u`.
+- Keep `sudo -H` in `runAsUser`: macOS `sudo` keeps the caller's `HOME`, and `security` then searches the wrong keychains, so every keychain lookup silently reports not found.
 - Remove paths through `safeRemove` instead of bare `rm -rf`.
 - Add `setopt localoptions noxtrace` to helpers that handle keychain items, package installs, or other sensitive data so `debug` traces stay safe.
 
