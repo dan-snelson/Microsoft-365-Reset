@@ -152,14 +152,14 @@ Script runs as root; keep these guardrails intact in `Microsoft-365-Reset.zsh` a
 - `self-service` is the primary guided user flow; empty `--operations` / `$5` allowlist exits `10` during preflight unless `--allow-all-operations` / `$6` is `true`.
 - `silent` is the primary automation flow, must not depend on dialog UI, and runs listed operations with no destructive confirmation.
 - `test` and `debug` are maintainer-facing modes and must not redefine production semantics by accident; empty allowlist only logs a `WARNING`. `test` is not a dry run.
-- Keep destructive operations (`remove_office`, `remove_outlook_data`, `remove_onenote_data`, `remove_defender`) behind interactive destructive-action confirmation.
+- Keep destructive operations (`reset_factory`, `remove_office`, `remove_outlook_data`, `remove_onenote_data`, `remove_defender`) behind interactive destructive-action confirmation.
 
 ## Exit Codes
 
 - `0`: success, including intentional user cancellation in interactive modes
 - `2`: no operations in `silent` mode, or destructive confirmation not acknowledged
 - `10`: preflight / validation failure, including empty `self-service` allowlist without `--allow-all-operations` / `$6`
-- `20`: one or more operations failed, including any path an operation could not remove
+- `20`: one or more operations failed, including any path or keychain item an operation could not remove
 
 ## Quality Bar
 

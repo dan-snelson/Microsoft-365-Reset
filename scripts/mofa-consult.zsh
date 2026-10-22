@@ -15,7 +15,7 @@ autoload -Uz is-at-least
 zmodload -F zsh/system b:sysopen
 
 scriptName="mofa-consult"
-scriptVersion="3.0.0b2"
+scriptVersion="3.0.0"
 defaultMofaRepo="../MOFA"
 # Per-user private temp folder (macOS TMPDIR), not a fixed shared path
 defaultOutputPath="${${TMPDIR:-${HOME}/Library/Caches}%/}/M365R-MOFA-report.md"
@@ -42,6 +42,8 @@ typeset -a reportLines
 localScriptChangeEpoch=""
 localScriptChangeDate=""
 localScriptHasUncommittedChanges="false"
+mofaHistoryAvailable="true"
+mofaHasUncommittedChanges="false"
 
 function usage() {
     cat <<EOF
@@ -159,6 +161,22 @@ function resolveLocalScriptChange() {
     localScriptChangeDate="${lastCommit#* }"
     if ! git -C "${repoRoot}" diff --quiet HEAD -- "Microsoft-365-Reset.zsh" 2>/dev/null; then
         localScriptHasUncommittedChanges="true"
+    fi
+}
+
+function resolveMofaHistory() {
+    # MOFA commit dates drive upstream drift; a MOFA tree without its own git history, or with edited scripts, cannot be compared reliably
+    local mofaScriptsRelativePath="office_reset_tools/mofa_community_maintained/scripts"
+    local mofaTopLevel
+    mofaTopLevel="$(git -C "${mofaRepoPath}" rev-parse --show-toplevel 2>/dev/null)"
+    if [[ -z "${mofaTopLevel}" || "${mofaTopLevel:A}" != "${mofaRepoPath:A}" ]]; then
+        mofaHistoryAvailable="false"
+        warning "MOFA git history is unavailable at ${mofaRepoPath}; skipping upstream change comparison"
+        return 0
+    fi
+    if [[ -n "$(git -C "${mofaRepoPath}" status --porcelain -- "${mofaScriptsRelativePath}" 2>/dev/null)" ]]; then
+        mofaHasUncommittedChanges="true"
+        warning "MOFA checkout has uncommitted changes under ${mofaScriptsRelativePath}; those changes are not compared"
     fi
 }
 
@@ -477,23 +495,26 @@ function buildScriptCoverageSection() {
     mofaScriptPathForOperation[remove_zoomplugin]="office_reset_tools/mofa_community_maintained/scripts/MOFA_Community_ZoomPlugin_Removal.zsh"
     mofaScriptPathForOperation[remove_webexpt]="office_reset_tools/mofa_community_maintained/scripts/MOFA_Community_WebExPT_Removal.zsh"
 
-    coveredNoteForOperation[reset_word]="Current MOFA repair flow exits without removing configuration data after repair; local deferred cleanup matches that behavior."
-    coveredNoteForOperation[reset_excel]="Current MOFA repair flow exits without removing configuration data after repair; local deferred cleanup matches that behavior."
     coveredNoteForOperation[reset_powerpoint]="Current MOFA repair flow exits without removing configuration data after repair; local deferred cleanup matches that behavior."
-    coveredNoteForOperation[reset_outlook]="Current MOFA repair flow exits without removing configuration data after repair; local deferred cleanup matches that behavior."
-    coveredNoteForOperation[reset_onenote]="Current MOFA repair flow exits without removing configuration data after repair; local deferred cleanup matches that behavior. Cleanup keeps the OneNote container (local sync cache), matching MOFA; only remove_onenote_data removes it."
     coveredNoteForOperation[remove_office]="Removes only the Office-owned children of /Library/Application Support/Microsoft (MAU2.0, MERP2.0, Office365) and keeps the Defender (com.microsoft.wdav) package receipt, matching current MOFA Office Removal."
 
-    intentionalNoteForOperation[reset_factory]="README parity note: reset_factory directly performs MOFA-aligned suite cleanup and intentionally adds package-era dependency expansion; it leaves /Library/Managed Preferences to MDM (only remove_office removes them)."
-    intentionalNoteForOperation[reset_teams]="README parity note: reset_teams suppresses Screen Recording UI in silent mode, preserves legacy Teams bundles during a standard reset, does not install Teams when the main bundle is absent, and stops before cleanup when backgrounds cannot be moved to the archive or staging (backgrounds under a symlinked parent are skipped with a warning and cleanup continues). Backgrounds are archived, staged in the console user's home folder, and restored as the console user without ownership changes. Background preservation (destination folders created in the console user's context) and TCC reset remain MOFA-aligned."
+    intentionalNoteForOperation[reset_factory]="README parity note: reset_factory directly performs MOFA-aligned suite cleanup and intentionally adds package-era dependency expansion; it leaves /Library/Managed Preferences to MDM (only remove_office removes them), archives classic Teams backgrounds before cleanup, and requires interactive destructive confirmation because it deletes the Office group container, including local Outlook data."
+    intentionalNoteForOperation[reset_word]="README parity note: reset_word leaves profile-delivered /Library/Managed Preferences files to MDM (only remove_office removes them); MOFA Word Reset removes com.microsoft.Word.plist. Current MOFA repair flow exits without removing configuration data after repair; local deferred cleanup matches that behavior."
+    intentionalNoteForOperation[reset_excel]="README parity note: reset_excel leaves profile-delivered /Library/Managed Preferences files to MDM (only remove_office removes them); MOFA Excel Reset removes com.microsoft.Excel.plist. Current MOFA repair flow exits without removing configuration data after repair; local deferred cleanup matches that behavior."
+    intentionalNoteForOperation[reset_outlook]="README parity note: reset_outlook leaves profile-delivered /Library/Managed Preferences files to MDM (only remove_office removes them); MOFA Outlook Reset removes com.microsoft.Outlook.plist. Current MOFA repair flow exits without removing configuration data after repair; local deferred cleanup matches that behavior."
+    intentionalNoteForOperation[reset_onenote]="README parity note: reset_onenote leaves profile-delivered /Library/Managed Preferences files to MDM (only remove_office removes them); MOFA OneNote Reset removes com.microsoft.onenote.mac.plist. Current MOFA repair flow exits without removing configuration data after repair; local deferred cleanup matches that behavior. Cleanup keeps the OneNote container (local sync cache), matching MOFA; only remove_onenote_data removes it."
+    intentionalNoteForOperation[reset_onedrive]="README parity note: reset_onedrive leaves profile-delivered /Library/Managed Preferences files to MDM (only remove_office removes them); MOFA OneDrive Reset removes com.microsoft.OneDriveStandaloneUpdater.plist and com.microsoft.OneDriveUpdater.plist."
+    intentionalNoteForOperation[reset_teams]="README parity note: reset_teams suppresses Screen Recording UI in silent mode, preserves legacy Teams bundles during a standard reset, does not install Teams when the main bundle is absent, and stops before cleanup when backgrounds cannot be moved to the archive or staging (backgrounds under a symlinked parent are skipped with a warning and cleanup continues). Backgrounds are archived, staged in the console user's home folder, and restored as the console user without ownership changes. Background preservation (destination folders created in the console user's context) and TCC reset remain MOFA-aligned. Leaves profile-delivered /Library/Managed Preferences files to MDM; MOFA Teams Reset removes com.microsoft.teams.plist and com.microsoft.teams.helper.plist."
     intentionalNoteForOperation[reset_autoupdate]="README parity note: AutoUpdate registration treats new Teams as TEAMS21 while keeping classic Teams on the legacy product ID."
     intentionalNoteForOperation[remove_skypeforbusiness]="README parity note: remove_skypeforbusiness does not remove the Dock entry; MOFA uses a bundled dockutil, and this repo adds no third-party dependency."
-    intentionalNoteForOperation[remove_zoomplugin]="README parity note: remove_zoomplugin does not remove the Dock entry; MOFA uses a bundled dockutil, and this repo adds no third-party dependency. Removal paths otherwise follow MOFA's ZoomMacOutlookPlugin.pkg targets."
+    intentionalNoteForOperation[remove_zoomplugin]="README parity note: remove_zoomplugin does not remove the Dock entry; MOFA uses a bundled dockutil, and this repo adds no third-party dependency. Runs the native uninstaller only when it and every parent directory are root-owned and not writable by non-admin users. Removal paths otherwise follow MOFA's ZoomMacOutlookPlugin.pkg targets."
+    intentionalNoteForOperation[remove_webexpt]="README parity note: remove_webexpt stops WebEx Productivity Tools processes by install path and webexmta by exact name instead of MOFA's bare pluginagent pattern, so other vendors' plugin agents keep running, and runs the native uninstaller only when it and every parent directory are root-owned and not writable by non-admin users. Removal paths otherwise follow MOFA."
 
     localOnlyReason[reset_teams_force]="Repo-local operation ID exposing the force-reinstall behavior available through MOFA Teams reset's INSTALL=force argument; no separate MOFA script exists."
     localOnlyReason[remove_acrobat_addin]="Local-only Adobe Acrobat add-in cleanup workflow."
 
     resolveLocalScriptChange
+    resolveMofaHistory
 
     appendReportLine "## Script Coverage"
     appendReportLine ""
@@ -528,7 +549,7 @@ function buildScriptCoverageSection() {
 
         # Wiring checks cannot see content changes; flag scripts MOFA changed after the local script last changed
         mofaChangeDate="Skipped"
-        if [[ -f "${mofaScriptPath}" ]]; then
+        if [[ -f "${mofaScriptPath}" && "${mofaHistoryAvailable}" == "true" ]]; then
             mofaLastCommit="$(lastCommitForPath "${mofaRepoPath}" "${mofaScriptRelativePath}")"
             if [[ -n "${mofaLastCommit}" ]]; then
                 mofaChangeEpoch="${mofaLastCommit%% *}"
@@ -758,9 +779,12 @@ function writeReport() {
 
     if [[ -z "${localScriptChangeEpoch}" ]]; then
         upstreamChangeSummary="Skipped (local git history unavailable)"
+    elif [[ "${mofaHistoryAvailable}" != "true" ]]; then
+        upstreamChangeSummary="Skipped (MOFA git history unavailable)"
     else
         upstreamChangeSummary="${upstreamChangeCount} (local script last committed ${localScriptChangeDate})"
         [[ "${localScriptHasUncommittedChanges}" == "true" ]] && upstreamChangeSummary="${upstreamChangeSummary}; uncommitted local changes are not compared"
+        [[ "${mofaHasUncommittedChanges}" == "true" ]] && upstreamChangeSummary="${upstreamChangeSummary}; uncommitted MOFA changes are not compared"
     fi
 
     outputDirectory="$(dirname "${outputPath}")"
@@ -807,12 +831,17 @@ function writeReport() {
         print -r -- ""
         if [[ -z "${localScriptChangeEpoch}" ]]; then
             print -r -- "- Skipped: local git history for Microsoft-365-Reset.zsh is unavailable"
+        elif [[ "${mofaHistoryAvailable}" != "true" ]]; then
+            print -r -- "- Skipped: MOFA git history is unavailable"
         elif (( upstreamChangeCount == 0 )); then
             print -r -- "- None"
         else
             for line in "${upstreamChangeItems[@]}"; do
                 print -r -- "- ${line}"
             done
+        fi
+        if [[ "${mofaHistoryAvailable}" == "true" && "${mofaHasUncommittedChanges}" == "true" ]]; then
+            print -r -- "- Note: uncommitted MOFA script changes are not compared"
         fi
 
         print -r -- ""
@@ -841,7 +870,7 @@ function writeReport() {
 
     info "MOFA report written to ${outputPath}"
     local upstreamChangeConsole="${upstreamChangeCount} upstream change(s) since local script"
-    [[ -z "${localScriptChangeEpoch}" ]] && upstreamChangeConsole="upstream change comparison skipped"
+    [[ -z "${localScriptChangeEpoch}" || "${mofaHistoryAvailable}" != "true" ]] && upstreamChangeConsole="upstream change comparison skipped"
     print -r -- "Summary: ${candidateCount} candidate inclusion item(s), ${intentionalCount} intentional divergence(s), ${localOnlyCount} local-only operation(s), ${upstreamChangeConsole}"
 }
 

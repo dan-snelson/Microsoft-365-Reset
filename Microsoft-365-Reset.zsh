@@ -12,7 +12,7 @@
 #
 # HISTORY
 #
-# Version 3.0.0b2, 22-Oct-2026, Dan K. Snelson (@dan-snelson)
+# Version 3.0.0, 22-Oct-2026, Dan K. Snelson (@dan-snelson)
 # - See CHANGELOG.md for details
 #
 ####################################################################################################
@@ -29,7 +29,7 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 setopt NONOMATCH
 
 # Script identity
-scriptVersion="3.0.0b2"
+scriptVersion="3.0.0"
 humanReadableScriptName="Microsoft 365 Reset"
 scriptName="M365R"
 
@@ -144,7 +144,7 @@ resolvedOperations=()
 failedOperations=()
 completedOperations=()
 repairedOperations=()
-removalFailures="0"    # paths safeRemove did not remove; reset per operation and checked by main
+removalFailures="0"    # paths safeRemove did not remove and keychain items left by delete loops; reset per operation and checked by main
 dialogPID=""
 interactiveCancelReturnCode="30"
 keychainDeleteLoopLimit="50"    # per label, service, or creator (MOFA-aligned)
@@ -204,7 +204,7 @@ operationTitle[remove_zoomplugin]="Remove Zoom Outlook Plugin"
 operationTitle[remove_webexpt]="Remove WebEx Productivity Tools"
 
 typeset -A operationDescription
-operationDescription[reset_factory]="Closes all Office apps, checks for damage and performs repairs as necessary. Resets shared suite data now; repaired app-specific cleanup may require a later run. This will not remove your personal documents."
+operationDescription[reset_factory]="Closes all Office apps, checks for damage and performs repairs as necessary. Resets shared suite data now; repaired app-specific cleanup may require a later run. Removes local Outlook data, Office templates and custom dictionaries stored on this Mac; files in your folders and OneDrive are not affected."
 operationDescription[reset_word]="Closes Microsoft Word, checks for damage and performs repairs as necessary. If repair is needed, additional reset cleanup runs on a later pass. This will not remove your personal documents."
 operationDescription[reset_excel]="Closes Microsoft Excel, checks for damage and performs repairs as necessary. If repair is needed, additional reset cleanup runs on a later pass. This will not remove your personal workbooks."
 operationDescription[reset_powerpoint]="Closes Microsoft PowerPoint, checks for damage and performs repairs as necessary. If repair is needed, additional reset cleanup runs on a later pass. This will not remove your personal presentations."
@@ -623,6 +623,11 @@ function deleteGenericByLabelLoop() {
         deleteGenericByLabel "${label}" "${user}" || break
         (( deleteCount++ ))
     done
+    # Items left behind (cap reached or a failed delete) fail the current operation (see main)
+    if findEntryGenericByLabel "${label}" "${user}"; then
+        warning "Keychain items with label '${label}' remain after ${deleteCount} deletion(s)"
+        (( removalFailures += 1 ))
+    fi
 }
 
 function deleteGenericByServiceLoop() {
@@ -638,6 +643,11 @@ function deleteGenericByServiceLoop() {
         deleteGenericByService "${service}" "${user}" || break
         (( deleteCount++ ))
     done
+    # Items left behind (cap reached or a failed delete) fail the current operation (see main)
+    if findEntryGenericByService "${service}" "${user}"; then
+        warning "Keychain items with service '${service}' remain after ${deleteCount} deletion(s)"
+        (( removalFailures += 1 ))
+    fi
 }
 
 function deleteGenericByCreatorLoop() {
@@ -653,15 +663,21 @@ function deleteGenericByCreatorLoop() {
         deleteGenericByCreator "${creator}" "${user}" || break
         (( deleteCount++ ))
     done
+    # Items left behind (cap reached or a failed delete) fail the current operation (see main)
+    if findEntryGenericByCreator "${creator}" "${user}"; then
+        warning "Keychain items with creator '${creator}' remain after ${deleteCount} deletion(s)"
+        (( removalFailures += 1 ))
+    fi
 }
 
 function ensureLoginKeychainPresent() {
+    setopt localoptions noxtrace
     local user="$1"
     local home="$2"
     local keychains
     keychains="$(runAsUser "${user}" /usr/bin/security list-keychains 2>/dev/null)"
     if [[ "${keychains}" != *"login.keychain"* ]]; then
-        runAsUser "${user}" /usr/bin/security list-keychains -s "${home}/Library/Keychains/login.keychain-db" >>"${scriptLog}" 2>&1
+        runAsUser "${user}" /usr/bin/security list-keychains -s "${home}/Library/Keychains/login.keychain-db" >/dev/null 2>&1
         # A missing login keychain makes every keychain lookup report not found, which is otherwise silent
         keychains="$(runAsUser "${user}" /usr/bin/security list-keychains 2>/dev/null)"
         if [[ "${keychains}" != *"login.keychain"* ]]; then
@@ -1025,6 +1041,37 @@ function dialogTrustCheck() {
     return 0
 }
 
+function executableIsRootTrusted() {
+    # Root runs vendor uninstallers; refuse any that a non-admin user could replace (admin group write is root-equivalent)
+    local executablePath="$1"
+    local startPath
+    local pathToCheck
+    local ownerMode
+    local ownerID
+    local groupID
+    local mode
+
+    [[ "${executablePath}" == /* && -f "${executablePath}" && -x "${executablePath}" ]] || return 1
+
+    # Check the path as given (stat does not follow symlinks) and its resolved target, up to /
+    for startPath in "${executablePath}" "${executablePath:A}"; do
+        pathToCheck="${startPath}"
+        while true; do
+            ownerMode="$(stat -f '%u %g %Lp' "${pathToCheck}" 2>/dev/null)"
+            read -r ownerID groupID mode <<< "${ownerMode}"
+            if [[ -z "${mode}" || "${ownerID}" != "0" ]] || (( 8#${mode} & 8#002 )) \
+                || { (( 8#${mode} & 8#020 )) && [[ "${groupID}" != "0" && "${groupID}" != "80" ]]; }; then
+                warning "Uninstaller path is not root-owned or is writable by non-admin users: ${pathToCheck} (${ownerMode:-unknown})"
+                return 1
+            fi
+            [[ "${pathToCheck}" == "/" ]] && break
+            pathToCheck="${pathToCheck:h}"
+        done
+    done
+
+    return 0
+}
+
 function dialogCheck() {
     if [[ ! -x "${dialogLinkPath}" ]]; then
         preFlight "swiftDialog binary not found; installing"
@@ -1280,6 +1327,8 @@ function resolveDependencies() {
 
 function confirmDestructiveSelection() {
     local requiresConfirmation="false"
+    # reset_factory deletes the Office group container, including local Outlook data
+    isOperationSelected reset_factory && requiresConfirmation="true"
     isOperationSelected remove_office && requiresConfirmation="true"
     isOperationSelected remove_outlook_data && requiresConfirmation="true"
     isOperationSelected remove_onenote_data && requiresConfirmation="true"
@@ -1924,6 +1973,11 @@ function cleanupFactoryResetArtifacts() {
 function op_reset_factory() {
     info "Starting operation: reset_factory"
     stopProcessGroupGracefully signalFactoryResetProcesses 3
+    # Factory cleanup removes ~/Library/Application Support/Microsoft; archive classic Teams backgrounds first
+    if ! archiveClassicTeamsBackgrounds; then
+        errorOut "Skipping factory cleanup to preserve classic Teams backgrounds"
+        return 1
+    fi
     cleanupFactoryResetArtifacts
     return 0
 }
@@ -2324,6 +2378,34 @@ function op_reset_onedrive() {
     return 0
 }
 
+function archiveClassicTeamsBackgrounds() {
+    # Moves classic Teams backgrounds to ~/Teams_Old_Backgrounds[N]; returns 1 only when the move fails, so callers stop before deleting them
+    local classicBackgroundsPath="${loggedInUserHome}/Library/Application Support/Microsoft/Teams/Backgrounds"
+    local teamsBackgroundArchive="${loggedInUserHome}/Teams_Old_Backgrounds"
+
+    if [[ -d "${classicBackgroundsPath}" ]] && ! pathHasTrustedParents "${classicBackgroundsPath}"; then
+        warning "Skipping classic Teams background archive; a parent directory resolves through a symlink: ${classicBackgroundsPath}"
+    elif [[ -d "${classicBackgroundsPath}" ]]; then
+        local originalArchivePath="${teamsBackgroundArchive}"
+        local archiveCounter=0
+        while [[ -e "${teamsBackgroundArchive}" || -L "${teamsBackgroundArchive}" ]]; do
+            ((archiveCounter++))
+            teamsBackgroundArchive="${originalArchivePath}${archiveCounter}"
+        done
+        # Rename as the console user (files are already theirs; root never changes ownership); -h: never follow a destination symlink
+        if ! runAsUser "${loggedInUser}" /bin/mv -h "${classicBackgroundsPath}" "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1; then
+            errorOut "Unable to archive classic Teams backgrounds"
+            return 1
+        fi
+        info "Archived classic Teams backgrounds to ${teamsBackgroundArchive}"
+        if [[ "${operationMode}" != "silent" ]]; then
+            runAsUser "${loggedInUser}" /usr/bin/open "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1
+        fi
+    fi
+
+    return 0
+}
+
 function resetTeamsOperation() {
     local forceReinstall="${1:-false}"
     local osVersion
@@ -2331,11 +2413,9 @@ function resetTeamsOperation() {
     local classicTeamsPath="/Applications/Microsoft Teams classic.app"
     local workOrSchoolTeamsPath="/Applications/Microsoft Teams (work or school).app"
     local teamsPkgURL="https://go.microsoft.com/fwlink/?linkid=2249065"
-    local classicBackgroundsPath="${loggedInUserHome}/Library/Application Support/Microsoft/Teams/Backgrounds"
     local modernBackgroundsPath="${loggedInUserHome}/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/Backgrounds"
     local modernBackgroundsStagingRoot=""
     local modernBackgroundsStaging=""
-    local teamsBackgroundArchive="${loggedInUserHome}/Teams_Old_Backgrounds"
     local installAttempt=1
     local installationRetries=5
     local shouldInstallTeams="${forceReinstall}"
@@ -2372,23 +2452,9 @@ function resetTeamsOperation() {
         shouldInstallTeams="true"
     fi
 
-    if [[ -d "${classicBackgroundsPath}" ]] && ! pathHasTrustedParents "${classicBackgroundsPath}"; then
-        warning "Skipping classic Teams background archive; a parent directory resolves through a symlink: ${classicBackgroundsPath}"
-    elif [[ -d "${classicBackgroundsPath}" ]]; then
-        local originalArchivePath="${teamsBackgroundArchive}"
-        local archiveCounter=0
-        while [[ -e "${teamsBackgroundArchive}" || -L "${teamsBackgroundArchive}" ]]; do
-            ((archiveCounter++))
-            teamsBackgroundArchive="${originalArchivePath}${archiveCounter}"
-        done
-        # Rename as the console user (files are already theirs; root never changes ownership); -h: never follow a destination symlink
-        if ! runAsUser "${loggedInUser}" /bin/mv -h "${classicBackgroundsPath}" "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1; then
-            errorOut "Unable to archive classic Teams backgrounds; skipping Teams reset to preserve them"
-            return 1
-        fi
-        if [[ "${operationMode}" != "silent" ]]; then
-            runAsUser "${loggedInUser}" /usr/bin/open "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1
-        fi
+    if ! archiveClassicTeamsBackgrounds; then
+        errorOut "Skipping Teams reset to preserve classic Teams backgrounds"
+        return 1
     fi
 
     if [[ -d "${modernBackgroundsPath}" ]] && ! pathHasTrustedParents "${modernBackgroundsPath}"; then
@@ -2833,12 +2899,16 @@ function op_remove_defender() {
 
     pkill -9 '^Microsoft Defender' 2>/dev/null
 
-    if [[ -e "${defenderUninstaller}" ]]; then
+    if [[ -e "${defenderUninstaller}" ]] && executableIsRootTrusted "${defenderUninstaller}"; then
         "${defenderUninstaller}" >>"${scriptLog}" 2>&1
         defenderStatus=$?
         if [[ ${defenderStatus} -ne 0 ]]; then
             errorOut "Microsoft Defender uninstaller exited ${defenderStatus}"
         fi
+    elif [[ -e "${defenderUninstaller}" ]]; then
+        errorOut "Refusing to run untrusted Microsoft Defender uninstaller; removing app bundle only"
+        defenderStatus=1
+        safeRemove "${defenderAppPath}"
     else
         safeRemove "${defenderAppPath}" || defenderStatus=1
     fi
@@ -2916,7 +2986,13 @@ function op_remove_zoomplugin() {
     pkill -9 -f '/ZoomOutlookPlugin/PluginLauncher\.app/' 2>/dev/null
     pkill -9 -x 'zOutlookPluginAgent' 2>/dev/null
 
-    [[ -x "${zoomUninstaller}" ]] && "${zoomUninstaller}" >>"${scriptLog}" 2>&1
+    if [[ -x "${zoomUninstaller}" ]]; then
+        if executableIsRootTrusted "${zoomUninstaller}"; then
+            "${zoomUninstaller}" >>"${scriptLog}" 2>&1
+        else
+            warning "Skipping untrusted Zoom Outlook Plugin uninstaller; removing files directly"
+        fi
+    fi
 
     bootoutLaunchJob "gui/${loggedInUserID}" us.zoom.pluginagent
     flushPreferenceCache
@@ -2948,10 +3024,17 @@ function op_remove_webexpt() {
 
     local webexUninstaller="/Applications/WebEx Productivity Tools/Uninstall/Contents/MacOS/Uninstall"
 
-    # Match by install path; MOFA's bare "pluginagent" pattern could stop other vendors' agents
+    # Match by install path, plus webexmta by exact name; MOFA's bare "pluginagent" pattern could stop other vendors' agents
     pkill -9 -f '^/Applications/WebEx Productivity Tools/' 2>/dev/null
+    pkill -9 -x 'webexmta' 2>/dev/null
 
-    [[ -x "${webexUninstaller}" ]] && "${webexUninstaller}" >>"${scriptLog}" 2>&1
+    if [[ -x "${webexUninstaller}" ]]; then
+        if executableIsRootTrusted "${webexUninstaller}"; then
+            "${webexUninstaller}" >>"${scriptLog}" 2>&1
+        else
+            warning "Skipping untrusted WebEx Productivity Tools uninstaller; removing files directly"
+        fi
+    fi
 
     bootoutLaunchJob "gui/${loggedInUserID}" com.webex.pluginagent
     flushPreferenceCache
@@ -3184,7 +3267,7 @@ function main() {
             info "Operation succeeded: ${op}"
         elif [[ ${operationRC} -eq 0 ]]; then
             appendFailure "${op}"
-            errorOut "Operation failed: ${op} (${removalFailures} path(s) not removed)"
+            errorOut "Operation failed: ${op} (${removalFailures} item(s) not removed)"
         else
             appendFailure "${op}"
             errorOut "Operation failed: ${op}"

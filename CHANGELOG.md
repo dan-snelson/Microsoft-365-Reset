@@ -2,10 +2,7 @@
 
 ## Changelog
 
-### Version 3.0.0b2 (22-Oct-2026)
-- Keychain cleanup now reaches the console user's login keychain when root's `HOME` is not the console user's home folder (for example, a root shell opened from an admin account, or a management agent running with `HOME=/var/root`). macOS `sudo` keeps the caller's `HOME`, so `security` searched only the System keychain, every lookup reported "not found", and `reset_credentials`, `reset_license`, `reset_outlook`, `reset_onedrive`, `reset_teams`, `reset_teams_force`, and `remove_skypeforbusiness` silently left sign-in items in place. Console-user commands now run with `sudo -H`, and a `WARNING` is logged if the login keychain is still missing from the user's keychain search list
-- Internal
-    - `AGENTS.md` and `.github` instructions: `runAsUser` must keep `sudo -H` so console-user commands see the console user's `HOME`
+### Version 3.0.0 (22-Oct-2026)
 - Reviewed MOFA community-script pull requests [#26-#41](https://github.com/cocopuff2u/MOFA/pulls?q=is%3Apr+is%3Amerged) (merged 21-Oct-2026) against the unified workflow
     - :warning: **Breaking Change:** :warning: `reset_onenote` (and therefore `reset_factory`) no longer deletes the OneNote container (`~/Library/Containers/com.microsoft.onenote.mac`), which holds the local sync cache, including notes not yet synced to the cloud; MOFA and the package-era workflow both keep it. Add `remove_onenote_data`, which requires destructive confirmation in interactive modes, to any policy that relied on the old behavior
     - Reset operations (`reset_word`, `reset_excel`, `reset_outlook`, `reset_onenote`, `reset_onedrive`, `reset_teams`, `reset_teams_force`, `reset_autoupdate`) now ask apps to quit (`SIGTERM`), wait 2 seconds only when something was running, then force-quit (`SIGKILL`) anything left; `reset_factory` does the same for all Microsoft apps with one 3-second wait. `reset_powerpoint`, `remove_*` operations, and `remove_acrobat_addin` still force-quit immediately, matching MOFA
@@ -21,10 +18,27 @@
     - Auto-repair runs the deep code-signature check once per app instead of twice when a bundle fails verification
     - Auto-repair now logs a `WARNING` when a package's download size cannot be verified (no `Content-Length`); the Microsoft signature check still decides whether the package installs
     - GHSA-gw3c-6fvh-7gqm (root-private download staging, Teams backgrounds handled as the user) was already addressed in `2.0.1`; no further change
-- Documented intentional divergence: `remove_zoomplugin` and `remove_skypeforbusiness` do not remove Dock entries (MOFA uses a bundled `dockutil`; this repo adds no third-party dependency)
+- Addressed findings from a pre-release review
+    - `reset_factory` now requires the destructive-action confirmation in interactive modes (`silent` is unchanged), because it deletes the Office group container (`~/Library/Group Containers/UBF8T346G9.Office`), including local Outlook data, Office templates, and custom dictionaries; its picker description no longer says it will not remove personal documents
+    - `reset_factory` now archives classic Teams backgrounds to `~/Teams_Old_Backgrounds` before its cleanup deletes `~/Library/Application Support/Microsoft`; previously they were deleted before `reset_teams` could archive them. If the archive fails, `reset_factory` stops before cleanup and fails (exit `20`)
+    - `remove_defender`, `remove_zoomplugin`, and `remove_webexpt` run a vendor uninstaller only when it and every parent directory are root-owned and not writable by non-admin users (admin-group write is allowed); otherwise the uninstaller is skipped with a log entry and files are removed directly, and `remove_defender` fails (exit `20`)
+    - Repeated keychain deletions now fail the operation (exit `20`) when matching items remain, whether the 50-item limit was reached or a delete failed; previously the operation could report success
+    - `remove_webexpt` now also stops `webexmta` by exact process name, matching MOFA
+    - The login-keychain search-list check no longer writes `security` output to the client log or `debug` traces
+- Reliability fixes
+    - Keychain cleanup now reaches the console user's login keychain when root's `HOME` is not the console user's home folder (for example, a root shell opened from an admin account, or a management agent running with `HOME=/var/root`). macOS `sudo` keeps the caller's `HOME`, so `security` searched only the System keychain, every lookup reported "not found", and `reset_credentials`, `reset_license`, `reset_outlook`, `reset_onedrive`, `reset_teams`, `reset_teams_force`, and `remove_skypeforbusiness` silently left sign-in items in place. Console-user commands now run with `sudo -H`, and a `WARNING` is logged if the login keychain is still missing from the user's keychain search list
+- Documented intentional divergences from current MOFA behavior
+    - `remove_zoomplugin` and `remove_skypeforbusiness` do not remove Dock entries (MOFA uses a bundled `dockutil`; this repo adds no third-party dependency)
+    - `remove_webexpt` stops WebEx Productivity Tools processes by install path instead of MOFA's bare `pluginagent` pattern, so other vendors' plugin agents keep running
+    - Auto-repair warns instead of failing when the server reports no `Content-Length`; MOFA fails the repair. A reported size that does not match the download still fails the repair
 - Internal
+    - `AGENTS.md` and `.github` instructions: `runAsUser` must keep `sudo -H` so console-user commands see the console user's `HOME`
     - `scripts/mofa-consult.zsh` adds a `MOFA Last Changed` column and an `Upstream Changes Since Local Script` section, which list mapped MOFA scripts committed after the last commit of `Microsoft-365-Reset.zsh` for semantic review; wiring checks alone missed the 21-Oct-2026 MOFA changes. The comparison is skipped with a warning when git history is unavailable
-    - `scripts/mofa-consult.zsh` adds intentional-divergence notes for `remove_zoomplugin` and `remove_skypeforbusiness`, and notes that `reset_onenote` keeps the OneNote container
+    - `scripts/mofa-consult.zsh` adds intentional-divergence notes for `remove_zoomplugin`, `remove_skypeforbusiness`, and `remove_webexpt`, and notes that `reset_onenote` keeps the OneNote container
+    - `SECURITY.md` now states that the auto-repair content-length check applies only when the server reports a size
+    - `AGENTS.md`, `SECURITY.md`, and `.github` instructions: `reset_factory` joins the destructive-confirmation list; exit `20` includes keychain items an operation could not remove
+    - `scripts/mofa-consult.zsh` classifies `reset_word`, `reset_excel`, `reset_outlook`, `reset_onenote`, and `reset_onedrive` as intentional divergences (they leave `/Library/Managed Preferences` to MDM; MOFA removes the app's managed preference files), adds the same note to `reset_teams`, and updates the `reset_factory` and `remove_webexpt` notes
+    - `scripts/mofa-consult.zsh --report-only` now warns and skips the upstream change comparison when the MOFA path has no git history of its own, and notes uncommitted MOFA script changes that it cannot compare
 
 ### Version 2.0.1 (03-Oct-2026)
 - Addressed findings from a third Monocle security review
