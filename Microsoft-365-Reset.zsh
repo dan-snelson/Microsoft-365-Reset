@@ -12,7 +12,7 @@
 #
 # HISTORY
 #
-# Version 2.0.1, 03-Oct-2026, Dan K. Snelson (@dan-snelson)
+# Version 3.0.0, 22-Oct-2026, Dan K. Snelson (@dan-snelson)
 # - See CHANGELOG.md for details
 #
 ####################################################################################################
@@ -29,7 +29,7 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 setopt NONOMATCH
 
 # Script identity
-scriptVersion="2.0.1"
+scriptVersion="3.0.0"
 humanReadableScriptName="Microsoft 365 Reset"
 scriptName="M365R"
 
@@ -144,9 +144,10 @@ resolvedOperations=()
 failedOperations=()
 completedOperations=()
 repairedOperations=()
-removalFailures="0"    # paths safeRemove did not remove; reset per operation and checked by main
+removalFailures="0"    # paths safeRemove did not remove and keychain items left by delete loops; reset per operation and checked by main
 dialogPID=""
 interactiveCancelReturnCode="30"
+keychainDeleteLoopLimit="50"    # per label, service, or creator (MOFA-aligned)
 
 # Logged-in user context (resolved during preflight)
 loggedInUser=""
@@ -203,7 +204,7 @@ operationTitle[remove_zoomplugin]="Remove Zoom Outlook Plugin"
 operationTitle[remove_webexpt]="Remove WebEx Productivity Tools"
 
 typeset -A operationDescription
-operationDescription[reset_factory]="Closes all Office apps, checks for damage and performs repairs as necessary. Resets shared suite data now; repaired app-specific cleanup may require a later run. This will not remove your personal documents."
+operationDescription[reset_factory]="Closes all Office apps, checks for damage and performs repairs as necessary. Resets shared suite data now; repaired app-specific cleanup may require a later run. Removes local Outlook data, Office templates and custom dictionaries stored on this Mac; files in your folders and OneDrive are not affected."
 operationDescription[reset_word]="Closes Microsoft Word, checks for damage and performs repairs as necessary. If repair is needed, additional reset cleanup runs on a later pass. This will not remove your personal documents."
 operationDescription[reset_excel]="Closes Microsoft Excel, checks for damage and performs repairs as necessary. If repair is needed, additional reset cleanup runs on a later pass. This will not remove your personal workbooks."
 operationDescription[reset_powerpoint]="Closes Microsoft PowerPoint, checks for damage and performs repairs as necessary. If repair is needed, additional reset cleanup runs on a later pass. This will not remove your personal presentations."
@@ -331,13 +332,14 @@ function runAsUser() {
     fi
 
     userID="$(id -u "${user}" 2>/dev/null)"
+    # -H: macOS sudo keeps the caller's HOME, and security then searches the wrong keychains (every lookup reports not found)
     if [[ "${userID}" =~ ^[0-9]+$ ]]; then
         # Run once in the user's GUI session; do not re-run on a non-zero exit
-        /bin/launchctl asuser "${userID}" /usr/bin/sudo -u "${user}" "$@"
+        /bin/launchctl asuser "${userID}" /usr/bin/sudo -H -u "${user}" "$@"
         return $?
     fi
 
-    /usr/bin/sudo -u "${user}" "$@"
+    /usr/bin/sudo -H -u "${user}" "$@"
 }
 
 function pathHasTrustedParents() {
@@ -608,30 +610,79 @@ function deleteGenericByCreator() {
 }
 
 function deleteGenericByLabelLoop() {
+    # Cap iterations (MOFA-aligned) so a delete that reports success but leaves the item cannot loop forever
     setopt localoptions noxtrace
     local label="$1"
     local user="${2:-}"
+    local deleteCount=0
     while findEntryGenericByLabel "${label}" "${user}"; do
+        if (( deleteCount >= keychainDeleteLoopLimit )); then
+            warning "Stopped deleting keychain items with label '${label}' after ${keychainDeleteLoopLimit} attempts"
+            break
+        fi
         deleteGenericByLabel "${label}" "${user}" || break
+        (( deleteCount++ ))
     done
+    # Items left behind (cap reached or a failed delete) fail the current operation (see main)
+    if findEntryGenericByLabel "${label}" "${user}"; then
+        warning "Keychain items with label '${label}' remain after ${deleteCount} deletion(s)"
+        (( removalFailures += 1 ))
+    fi
+}
+
+function deleteGenericByServiceLoop() {
+    setopt localoptions noxtrace
+    local service="$1"
+    local user="${2:-}"
+    local deleteCount=0
+    while findEntryGenericByService "${service}" "${user}"; do
+        if (( deleteCount >= keychainDeleteLoopLimit )); then
+            warning "Stopped deleting keychain items with service '${service}' after ${keychainDeleteLoopLimit} attempts"
+            break
+        fi
+        deleteGenericByService "${service}" "${user}" || break
+        (( deleteCount++ ))
+    done
+    # Items left behind (cap reached or a failed delete) fail the current operation (see main)
+    if findEntryGenericByService "${service}" "${user}"; then
+        warning "Keychain items with service '${service}' remain after ${deleteCount} deletion(s)"
+        (( removalFailures += 1 ))
+    fi
 }
 
 function deleteGenericByCreatorLoop() {
     setopt localoptions noxtrace
     local creator="$1"
     local user="${2:-}"
+    local deleteCount=0
     while findEntryGenericByCreator "${creator}" "${user}"; do
+        if (( deleteCount >= keychainDeleteLoopLimit )); then
+            warning "Stopped deleting keychain items with creator '${creator}' after ${keychainDeleteLoopLimit} attempts"
+            break
+        fi
         deleteGenericByCreator "${creator}" "${user}" || break
+        (( deleteCount++ ))
     done
+    # Items left behind (cap reached or a failed delete) fail the current operation (see main)
+    if findEntryGenericByCreator "${creator}" "${user}"; then
+        warning "Keychain items with creator '${creator}' remain after ${deleteCount} deletion(s)"
+        (( removalFailures += 1 ))
+    fi
 }
 
 function ensureLoginKeychainPresent() {
+    setopt localoptions noxtrace
     local user="$1"
     local home="$2"
     local keychains
     keychains="$(runAsUser "${user}" /usr/bin/security list-keychains 2>/dev/null)"
     if [[ "${keychains}" != *"login.keychain"* ]]; then
-        runAsUser "${user}" /usr/bin/security list-keychains -s "${home}/Library/Keychains/login.keychain-db" >>"${scriptLog}" 2>&1
+        runAsUser "${user}" /usr/bin/security list-keychains -s "${home}/Library/Keychains/login.keychain-db" >/dev/null 2>&1
+        # A missing login keychain makes every keychain lookup report not found, which is otherwise silent
+        keychains="$(runAsUser "${user}" /usr/bin/security list-keychains 2>/dev/null)"
+        if [[ "${keychains}" != *"login.keychain"* ]]; then
+            warning "Login keychain is not in the keychain search list for ${user}; keychain cleanup may be incomplete"
+        fi
     fi
 }
 
@@ -731,12 +782,13 @@ function repairFromMicrosoftPkg() {
             return 1
         fi
 
-        if [[ -n "${expectedSize}" ]]; then
-            localSize="$(stat -qf%z "${pkgPath}" 2>/dev/null)"
-            if [[ -n "${localSize}" && "${localSize}" != "${expectedSize}" ]]; then
-                errorOut "Malformed package download for ${appName}; expected ${expectedSize}, got ${localSize}"
-                return 1
-            fi
+        localSize="$(stat -qf%z "${pkgPath}" 2>/dev/null)"
+        if [[ -z "${expectedSize}" || -z "${localSize}" ]]; then
+            # Signature verification below still gates the install
+            warning "Package size not verified for ${appName}; relying on signature check"
+        elif [[ "${localSize}" != "${expectedSize}" ]]; then
+            errorOut "Malformed package download for ${appName}; expected ${expectedSize}, got ${localSize}"
+            return 1
         fi
 
         if ! verifyMicrosoftPkgSignature "${pkgPath}"; then
@@ -883,9 +935,11 @@ function maybeRepairOfficeApp() {
         fi
     fi
 
-    /usr/bin/codesign -vv --deep "${appPath}" >>"${scriptLog}" 2>&1
-    if [[ $? -ne 0 ]]; then
-        codesignError="$(/usr/bin/codesign -vv --deep "${appPath}" 2>&1)"
+    # One deep verification; its output is both logged and matched below (MOFA-aligned)
+    local codesignRC=0
+    codesignError="$(/usr/bin/codesign -vv --deep "${appPath}" 2>&1)" || codesignRC=$?
+    [[ -n "${codesignError}" ]] && print -r -- "${codesignError}" >>"${scriptLog}"
+    if [[ ${codesignRC} -ne 0 ]]; then
         if [[ "${codesignError}" == *"OLE.framework"* ]]; then
             warning "${appName} codesign mismatch limited to OLE.framework; proceeding"
         else
@@ -984,6 +1038,37 @@ function dialogTrustCheck() {
     fi
 
     dialogBinary="${resolvedPath}"
+    return 0
+}
+
+function executableIsRootTrusted() {
+    # Root runs vendor uninstallers; refuse any that a non-admin user could replace (admin group write is root-equivalent)
+    local executablePath="$1"
+    local startPath
+    local pathToCheck
+    local ownerMode
+    local ownerID
+    local groupID
+    local mode
+
+    [[ "${executablePath}" == /* && -f "${executablePath}" && -x "${executablePath}" ]] || return 1
+
+    # Check the path as given (stat does not follow symlinks) and its resolved target, up to /
+    for startPath in "${executablePath}" "${executablePath:A}"; do
+        pathToCheck="${startPath}"
+        while true; do
+            ownerMode="$(stat -f '%u %g %Lp' "${pathToCheck}" 2>/dev/null)"
+            read -r ownerID groupID mode <<< "${ownerMode}"
+            if [[ -z "${mode}" || "${ownerID}" != "0" ]] || (( 8#${mode} & 8#002 )) \
+                || { (( 8#${mode} & 8#020 )) && [[ "${groupID}" != "0" && "${groupID}" != "80" ]]; }; then
+                warning "Uninstaller path is not root-owned or is writable by non-admin users: ${pathToCheck} (${ownerMode:-unknown})"
+                return 1
+            fi
+            [[ "${pathToCheck}" == "/" ]] && break
+            pathToCheck="${pathToCheck:h}"
+        done
+    done
+
     return 0
 }
 
@@ -1242,6 +1327,8 @@ function resolveDependencies() {
 
 function confirmDestructiveSelection() {
     local requiresConfirmation="false"
+    # reset_factory deletes the Office group container, including local Outlook data
+    isOperationSelected reset_factory && requiresConfirmation="true"
     isOperationSelected remove_office && requiresConfirmation="true"
     isOperationSelected remove_outlook_data && requiresConfirmation="true"
     isOperationSelected remove_onenote_data && requiresConfirmation="true"
@@ -1520,24 +1607,80 @@ function prepareForAcrobatAddinRemoval() {
     writeDialogCommand "progresstext: Removing Adobe Acrobat add-in payloads ..."
 }
 
+function stopProcessGracefully() {
+    # SIGTERM first; wait only when something was running, then SIGKILL anything left (MOFA-aligned)
+    pkill "$@" 2>/dev/null && sleep 2
+    pkill -9 "$@" 2>/dev/null
+    return 0
+}
+
+function stopProcessGroupGracefully() {
+    # Same as stopProcessGracefully for a signal*Processes function, so one wait covers the whole group
+    local signalFunction="$1"
+    local waitSeconds="${2:-2}"
+    "${signalFunction}" TERM && sleep "${waitSeconds}"
+    "${signalFunction}" KILL
+    return 0
+}
+
+function signalOneDriveProcesses() {
+    # Returns 0 when any process matched
+    local signal="$1"
+    local matched=1
+    pkill -"${signal}" '^OneDrive' 2>/dev/null && matched=0
+    pkill -"${signal}" -f '/Applications/OneDrive\.app/Contents/PlugIns/FinderSync\.appex/' 2>/dev/null && matched=0
+    return ${matched}
+}
+
+function signalTeamsProcesses() {
+    local signal="$1"
+    local matched=1
+    pkill -"${signal}" -x 'MSTeams' 2>/dev/null && matched=0
+    pkill -"${signal}" '^Microsoft Teams' 2>/dev/null && matched=0
+    return ${matched}
+}
+
+function signalAutoUpdateProcesses() {
+    local signal="$1"
+    local matched=1
+    pkill -"${signal}" '^Microsoft (AutoUpdate|Update Assistant|AU )' 2>/dev/null && matched=0
+    pkill -"${signal}" '^com\.microsoft\.autoupdate\.' 2>/dev/null && matched=0
+    return ${matched}
+}
+
+function signalCommonOfficeProcesses() {
+    local signal="$1"
+    local matched=1
+    pkill -"${signal}" -x 'Microsoft Word' 2>/dev/null && matched=0
+    pkill -"${signal}" -x 'Microsoft Excel' 2>/dev/null && matched=0
+    pkill -"${signal}" -x 'Microsoft PowerPoint' 2>/dev/null && matched=0
+    pkill -"${signal}" -x 'Microsoft Outlook' 2>/dev/null && matched=0
+    pkill -"${signal}" -x 'Microsoft OneNote' 2>/dev/null && matched=0
+    signalOneDriveProcesses "${signal}" && matched=0
+    signalTeamsProcesses "${signal}" && matched=0
+    signalAutoUpdateProcesses "${signal}" && matched=0
+    return ${matched}
+}
+
+function signalFactoryResetProcesses() {
+    local signal="$1"
+    local matched=1
+    signalCommonOfficeProcesses "${signal}" && matched=0
+    pkill -"${signal}" -x 'com\.microsoft\.teams2\.launcher' 2>/dev/null && matched=0
+    return ${matched}
+}
+
 function stopCommonOfficeProcesses() {
-    pkill -9 -x 'Microsoft Word' 2>/dev/null
-    pkill -9 -x 'Microsoft Excel' 2>/dev/null
-    pkill -9 -x 'Microsoft PowerPoint' 2>/dev/null
-    pkill -9 -x 'Microsoft Outlook' 2>/dev/null
-    pkill -9 -x 'Microsoft OneNote' 2>/dev/null
-    pkill -9 '^OneDrive' 2>/dev/null
-    pkill -9 -f '/Applications/OneDrive\.app/Contents/PlugIns/FinderSync\.appex/' 2>/dev/null
-    pkill -9 -x 'MSTeams' 2>/dev/null
-    pkill -9 '^Microsoft Teams' 2>/dev/null
-    pkill -9 '^Microsoft (AutoUpdate|Update Assistant|AU )' 2>/dev/null
-    pkill -9 '^com\.microsoft\.autoupdate\.' 2>/dev/null
+    # Immediate SIGKILL for remove_office (MOFA Office Removal still uses pkill -9)
+    signalCommonOfficeProcesses KILL
+    return 0
 }
 
 function removeOfficePreinstall() {
     info "Running Remove Office preinstall sequence"
 
     stopCommonOfficeProcesses
+    flushPreferenceCache
 
     bootoutLaunchJob "gui/${loggedInUserID}" com.microsoft.update.agent
     bootoutLaunchJob "gui/${loggedInUserID}" com.microsoft.autoupdate.helper
@@ -1556,12 +1699,14 @@ function removeOfficePreinstall() {
     safeRemove "/Applications/Microsoft Teams.app"
     safeRemove "/Applications/Microsoft Teams classic.app"
     safeRemove "/Applications/Microsoft Teams (work or school).app"
+    safeRemove "/Applications/Microsoft AutoUpdate.app"
     safeRemoveMatches /Applications/CodeSignSummary-*.md(N)
 
     safeRemove "/Library/Application Support/Microsoft/MAU2.0"
     safeRemove "/Library/Application Support/Microsoft/MERP2.0"
     safeRemove "/Library/Application Support/Microsoft/Office365"
     safeRemove "${loggedInUserHome}/Library/Application Support/Microsoft"
+    safeRemove "${loggedInUserHome}/Library/Application Support/OneDrive"
 
     safeRemove "${loggedInUserHome}/Library/Application Scripts/com.microsoft.errorreporting"
     safeRemove "${loggedInUserHome}/Library/Application Scripts/com.microsoft.OneDrive.FinderSync"
@@ -1827,9 +1972,12 @@ function cleanupFactoryResetArtifacts() {
 
 function op_reset_factory() {
     info "Starting operation: reset_factory"
-    stopCommonOfficeProcesses
-    pkill -9 '^Microsoft Teams' 2>/dev/null
-    pkill -9 -x 'com\.microsoft\.teams2\.launcher' 2>/dev/null
+    stopProcessGroupGracefully signalFactoryResetProcesses 3
+    # Factory cleanup removes ~/Library/Application Support/Microsoft; archive classic Teams backgrounds first
+    if ! archiveClassicTeamsBackgrounds; then
+        errorOut "Skipping factory cleanup to preserve classic Teams backgrounds"
+        return 1
+    fi
     cleanupFactoryResetArtifacts
     return 0
 }
@@ -1848,7 +1996,7 @@ function op_reset_word() {
     local osVersion
     osVersion="$(sw_vers -productVersion)"
 
-    pkill -9 -x 'Microsoft Word' 2>/dev/null
+    stopProcessGracefully -x 'Microsoft Word'
 
     maybeRepairOfficeApp \
         "Microsoft Word" \
@@ -1891,7 +2039,7 @@ function op_reset_excel() {
     local osVersion
     osVersion="$(sw_vers -productVersion)"
 
-    pkill -9 -x 'Microsoft Excel' 2>/dev/null
+    stopProcessGracefully -x 'Microsoft Excel'
 
     maybeRepairOfficeApp \
         "Microsoft Excel" \
@@ -1987,7 +2135,7 @@ function op_reset_outlook() {
     local osVersion
     osVersion="$(sw_vers -productVersion)"
 
-    pkill -9 -x 'Microsoft Outlook' 2>/dev/null
+    stopProcessGracefully -x 'Microsoft Outlook'
 
     maybeRepairOfficeApp \
         "Microsoft Outlook" \
@@ -2051,9 +2199,19 @@ function op_remove_outlook_data() {
     info "Starting operation: remove_outlook_data"
 
     pkill -9 -x 'Microsoft Outlook' 2>/dev/null
+    flushPreferenceCache
+
     safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.Outlook.plist"
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/Outlook"
     safeRemove "${loggedInUserHome}/Library/Group Containers/UBF8T346G9.Office/OutlookProfile.plist"
+
+    # Legacy Outlook 2016 data location
+    safeRemove "${loggedInUserHome}/Library/Application Support/Microsoft/Outlook"
+
+    safeRemove "${loggedInUserHome}/Library/Caches/com.microsoft.Outlook"
+    safeRemove "${loggedInUserHome}/Library/WebKit/com.microsoft.Outlook"
+    safeRemove "${loggedInUserHome}/Library/Saved Application State/com.microsoft.Outlook.savedState"
+    safeRemove "${loggedInUserHome}/Library/Cookies/com.microsoft.Outlook.binarycookies"
 
     return 0
 }
@@ -2063,7 +2221,7 @@ function op_reset_onenote() {
     local osVersion
     osVersion="$(sw_vers -productVersion)"
 
-    pkill -9 -x 'Microsoft OneNote' 2>/dev/null
+    stopProcessGracefully -x 'Microsoft OneNote'
 
     maybeRepairOfficeApp \
         "Microsoft OneNote" \
@@ -2081,7 +2239,7 @@ function op_reset_onenote() {
 
     safeRemove "/Library/Preferences/com.microsoft.onenote.mac.plist"
     safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.onenote.mac.plist"
-    safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.onenote.mac"
+    # The OneNote container holds the local sync cache (unsynced notes); only remove_onenote_data removes it, after destructive confirmation (MOFA-aligned)
     safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.onenote.mac.shareextension"
     safeRemove "${loggedInUserHome}/Library/Application Scripts/com.microsoft.onenote.mac"
     safeRemove "${loggedInUserHome}/Library/Application Scripts/com.microsoft.onenote.mac.shareextension"
@@ -2113,8 +2271,7 @@ function op_reset_onedrive() {
     local osVersion
     osVersion="$(sw_vers -productVersion)"
 
-    pkill -9 '^OneDrive' 2>/dev/null
-    pkill -9 -f '/Applications/OneDrive\.app/Contents/PlugIns/FinderSync\.appex/' 2>/dev/null
+    stopProcessGroupGracefully signalOneDriveProcesses
 
     if [[ -d "/Applications/OneDrive.app" ]]; then
         local oneDriveVersion
@@ -2221,6 +2378,34 @@ function op_reset_onedrive() {
     return 0
 }
 
+function archiveClassicTeamsBackgrounds() {
+    # Moves classic Teams backgrounds to ~/Teams_Old_Backgrounds[N]; returns 1 only when the move fails, so callers stop before deleting them
+    local classicBackgroundsPath="${loggedInUserHome}/Library/Application Support/Microsoft/Teams/Backgrounds"
+    local teamsBackgroundArchive="${loggedInUserHome}/Teams_Old_Backgrounds"
+
+    if [[ -d "${classicBackgroundsPath}" ]] && ! pathHasTrustedParents "${classicBackgroundsPath}"; then
+        warning "Skipping classic Teams background archive; a parent directory resolves through a symlink: ${classicBackgroundsPath}"
+    elif [[ -d "${classicBackgroundsPath}" ]]; then
+        local originalArchivePath="${teamsBackgroundArchive}"
+        local archiveCounter=0
+        while [[ -e "${teamsBackgroundArchive}" || -L "${teamsBackgroundArchive}" ]]; do
+            ((archiveCounter++))
+            teamsBackgroundArchive="${originalArchivePath}${archiveCounter}"
+        done
+        # Rename as the console user (files are already theirs; root never changes ownership); -h: never follow a destination symlink
+        if ! runAsUser "${loggedInUser}" /bin/mv -h "${classicBackgroundsPath}" "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1; then
+            errorOut "Unable to archive classic Teams backgrounds"
+            return 1
+        fi
+        info "Archived classic Teams backgrounds to ${teamsBackgroundArchive}"
+        if [[ "${operationMode}" != "silent" ]]; then
+            runAsUser "${loggedInUser}" /usr/bin/open "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1
+        fi
+    fi
+
+    return 0
+}
+
 function resetTeamsOperation() {
     local forceReinstall="${1:-false}"
     local osVersion
@@ -2228,11 +2413,9 @@ function resetTeamsOperation() {
     local classicTeamsPath="/Applications/Microsoft Teams classic.app"
     local workOrSchoolTeamsPath="/Applications/Microsoft Teams (work or school).app"
     local teamsPkgURL="https://go.microsoft.com/fwlink/?linkid=2249065"
-    local classicBackgroundsPath="${loggedInUserHome}/Library/Application Support/Microsoft/Teams/Backgrounds"
     local modernBackgroundsPath="${loggedInUserHome}/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/Backgrounds"
     local modernBackgroundsStagingRoot=""
     local modernBackgroundsStaging=""
-    local teamsBackgroundArchive="${loggedInUserHome}/Teams_Old_Backgrounds"
     local installAttempt=1
     local installationRetries=5
     local shouldInstallTeams="${forceReinstall}"
@@ -2240,8 +2423,7 @@ function resetTeamsOperation() {
     local teamsReplacePath=""    # removed only after the replacement package downloads and verifies
     osVersion="$(sw_vers -productVersion)"
 
-    pkill -9 -x 'MSTeams' 2>/dev/null
-    pkill -9 '^Microsoft Teams' 2>/dev/null
+    stopProcessGroupGracefully signalTeamsProcesses
 
     if [[ -d "${teamsAppPath}" ]]; then
         local currentTeamsVersion
@@ -2270,23 +2452,9 @@ function resetTeamsOperation() {
         shouldInstallTeams="true"
     fi
 
-    if [[ -d "${classicBackgroundsPath}" ]] && ! pathHasTrustedParents "${classicBackgroundsPath}"; then
-        warning "Skipping classic Teams background archive; a parent directory resolves through a symlink: ${classicBackgroundsPath}"
-    elif [[ -d "${classicBackgroundsPath}" ]]; then
-        local originalArchivePath="${teamsBackgroundArchive}"
-        local archiveCounter=0
-        while [[ -e "${teamsBackgroundArchive}" || -L "${teamsBackgroundArchive}" ]]; do
-            ((archiveCounter++))
-            teamsBackgroundArchive="${originalArchivePath}${archiveCounter}"
-        done
-        # Rename as the console user (files are already theirs; root never changes ownership); -h: never follow a destination symlink
-        if ! runAsUser "${loggedInUser}" /bin/mv -h "${classicBackgroundsPath}" "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1; then
-            errorOut "Unable to archive classic Teams backgrounds; skipping Teams reset to preserve them"
-            return 1
-        fi
-        if [[ "${operationMode}" != "silent" ]]; then
-            runAsUser "${loggedInUser}" /usr/bin/open "${teamsBackgroundArchive}" >>"${scriptLog}" 2>&1
-        fi
+    if ! archiveClassicTeamsBackgrounds; then
+        errorOut "Skipping Teams reset to preserve classic Teams backgrounds"
+        return 1
     fi
 
     if [[ -d "${modernBackgroundsPath}" ]] && ! pathHasTrustedParents "${modernBackgroundsPath}"; then
@@ -2445,8 +2613,7 @@ function op_reset_teams_force() {
 function op_reset_autoupdate() {
     info "Starting operation: reset_autoupdate"
 
-    pkill -9 '^Microsoft (AutoUpdate|Update Assistant|AU )' 2>/dev/null
-    pkill -9 '^com\.microsoft\.autoupdate\.' 2>/dev/null
+    stopProcessGroupGracefully signalAutoUpdateProcesses
 
     bootoutLaunchJob "gui/${loggedInUserID}" com.microsoft.update.agent
     bootoutLaunchJob "gui/${loggedInUserID}" com.microsoft.autoupdate.helper
@@ -2543,11 +2710,14 @@ function resetAutoUpdateCore() {
 }
 
 function resetOfficeLicenseCore() {
-    pkill -HUP -x 'Microsoft Word' 2>/dev/null
-    pkill -HUP -x 'Microsoft Excel' 2>/dev/null
-    pkill -HUP -x 'Microsoft PowerPoint' 2>/dev/null
-    pkill -HUP -x 'Microsoft Outlook' 2>/dev/null
-    pkill -HUP -x 'Microsoft OneNote' 2>/dev/null
+    local hupMatched=1
+    pkill -HUP -x 'Microsoft Word' 2>/dev/null && hupMatched=0
+    pkill -HUP -x 'Microsoft Excel' 2>/dev/null && hupMatched=0
+    pkill -HUP -x 'Microsoft PowerPoint' 2>/dev/null && hupMatched=0
+    pkill -HUP -x 'Microsoft Outlook' 2>/dev/null && hupMatched=0
+    pkill -HUP -x 'Microsoft OneNote' 2>/dev/null && hupMatched=0
+    # Give signaled apps time to exit before their keychain items and licensing files are removed (MOFA-aligned)
+    (( hupMatched == 0 )) && sleep 2
 
     ensureLoginKeychainPresent "${loggedInUser}" "${loggedInUserHome}"
 
@@ -2641,6 +2811,9 @@ function resetOfficeExtendedSignInArtifacts() {
     deleteGenericByLabel 'OneDrive Standalone Cached Credential' "${loggedInUser}"
     deleteGenericByService 'com.microsoft.onedrive.cookies' "${loggedInUser}"
 
+    # resetOfficeLicenseCore deletes one OneAuthAccount item; remove any others (MOFA OfficeLicenseSignIn Reset)
+    deleteGenericByServiceLoop 'OneAuthAccount' "${loggedInUser}"
+
     safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.msa-login-hint.plist"
 
     local keychainDB
@@ -2653,10 +2826,15 @@ function resetOfficeExtendedSignInArtifacts() {
     return 0
 }
 
-function finalizeOfficeCredentialReset() {
+function flushPreferenceCache() {
     # Flush cached preferences for the console user and root only; other logged-in users' sessions are left alone
     /usr/bin/killall -u "${loggedInUser}" cfprefsd >>"${scriptLog}" 2>&1
     /usr/bin/killall -u root cfprefsd >>"${scriptLog}" 2>&1
+    return 0
+}
+
+function finalizeOfficeCredentialReset() {
+    flushPreferenceCache
     return 0
 }
 
@@ -2685,9 +2863,14 @@ function op_remove_skypeforbusiness() {
     info "Starting operation: remove_skypeforbusiness"
 
     pkill -9 -x 'Skype for Business' 2>/dev/null
+    flushPreferenceCache
 
     safeRemove "${loggedInUserHome}/Library/Application Scripts/com.microsoft.SkypeForBusiness"
     safeRemove "${loggedInUserHome}/Library/Containers/com.microsoft.SkypeForBusiness"
+    safeRemove "${loggedInUserHome}/Library/Application Support/Microsoft/SkypeForBusiness"
+    safeRemove "${loggedInUserHome}/Library/Caches/com.microsoft.SkypeForBusiness"
+    safeRemove "${loggedInUserHome}/Library/Saved Application State/com.microsoft.SkypeForBusiness.savedState"
+    safeRemove "${loggedInUserHome}/Library/Cookies/com.microsoft.SkypeForBusiness.binarycookies"
     safeRemove "${loggedInUserHome}/Library/Preferences/com.microsoft.OutlookSkypeIntegration.plist"
 
     safeRemove "/Library/Preferences/com.microsoft.SkypeForBusiness.plist"
@@ -2716,12 +2899,16 @@ function op_remove_defender() {
 
     pkill -9 '^Microsoft Defender' 2>/dev/null
 
-    if [[ -e "${defenderUninstaller}" ]]; then
+    if [[ -e "${defenderUninstaller}" ]] && executableIsRootTrusted "${defenderUninstaller}"; then
         "${defenderUninstaller}" >>"${scriptLog}" 2>&1
         defenderStatus=$?
         if [[ ${defenderStatus} -ne 0 ]]; then
             errorOut "Microsoft Defender uninstaller exited ${defenderStatus}"
         fi
+    elif [[ -e "${defenderUninstaller}" ]]; then
+        errorOut "Refusing to run untrusted Microsoft Defender uninstaller; removing app bundle only"
+        defenderStatus=1
+        safeRemove "${defenderAppPath}"
     else
         safeRemove "${defenderAppPath}" || defenderStatus=1
     fi
@@ -2793,18 +2980,36 @@ function op_remove_acrobat_addin() {
 function op_remove_zoomplugin() {
     info "Starting operation: remove_zoomplugin"
 
-    /Applications/ZoomOutlookPlugin/Uninstall/Contents/MacOS/Uninstall >>"${scriptLog}" 2>&1
+    local zoomUninstaller="/Applications/ZoomOutlookPlugin/Uninstall/Contents/MacOS/Uninstall"
+
+    # Match PluginLauncher by bundle path so an unrelated PluginLauncher process is never stopped
+    pkill -9 -f '/ZoomOutlookPlugin/PluginLauncher\.app/' 2>/dev/null
+    pkill -9 -x 'zOutlookPluginAgent' 2>/dev/null
+
+    if [[ -x "${zoomUninstaller}" ]]; then
+        if executableIsRootTrusted "${zoomUninstaller}"; then
+            "${zoomUninstaller}" >>"${scriptLog}" 2>&1
+        else
+            warning "Skipping untrusted Zoom Outlook Plugin uninstaller; removing files directly"
+        fi
+    fi
 
     bootoutLaunchJob "gui/${loggedInUserID}" us.zoom.pluginagent
+    flushPreferenceCache
 
+    # Removal targets follow MOFA, which takes them from Zoom's ZoomMacOutlookPlugin.pkg
     safeRemove "/Library/LaunchAgents/us.zoom.pluginagent.plist"
     safeRemove "${loggedInUserHome}/Library/LaunchAgents/us.zoom.pluginagent.plist"
     safeRemove "${loggedInUserHome}/Library/Logs/zoomoutlookplugin.log"
-    safeRemove "${loggedInUserHome}/Library/Preferences/ZoomChat.plist"
+    safeRemove "${loggedInUserHome}/Library/Preferences/us.zoom.pluginagent.plist"
+    safeRemove "${loggedInUserHome}/Library/Preferences/us.zoom.olpluginlauncher.plist"
+    safeRemove "${loggedInUserHome}/Library/Application Support/ZoomOutlookPlugin"
 
     safeRemove "/Library/Application Support/ZoomOutlookPlugin"
     safeRemove "/Library/Application Support/Microsoft/ZoomOutlookPlugin"
     safeRemove "/Library/ScriptingAdditions/zOLPluginInjection.osax"
+    safeRemove "/Library/ScriptingAdditions/zPluginScriptAddition.osax"
+    safeRemove "/Library/Logs/zoomoutlookplugin.log"
     safeRemove "/Users/Shared/ZoomOutlookPlugin"
 
     safeRemove "/Applications/ZoomOutlookPlugin"
@@ -2817,9 +3022,24 @@ function op_remove_zoomplugin() {
 function op_remove_webexpt() {
     info "Starting operation: remove_webexpt"
 
-    /Applications/WebEx\ Productivity\ Tools/Uninstall/Contents/MacOS/Uninstall >>"${scriptLog}" 2>&1
+    local webexUninstaller="/Applications/WebEx Productivity Tools/Uninstall/Contents/MacOS/Uninstall"
+
+    # Match by install path, plus webexmta by exact name; MOFA's bare "pluginagent" pattern could stop other vendors' agents
+    pkill -9 -f '^/Applications/WebEx Productivity Tools/' 2>/dev/null
+    pkill -9 -x 'webexmta' 2>/dev/null
+
+    if [[ -x "${webexUninstaller}" ]]; then
+        if executableIsRootTrusted "${webexUninstaller}"; then
+            "${webexUninstaller}" >>"${scriptLog}" 2>&1
+        else
+            warning "Skipping untrusted WebEx Productivity Tools uninstaller; removing files directly"
+        fi
+    fi
 
     bootoutLaunchJob "gui/${loggedInUserID}" com.webex.pluginagent
+    flushPreferenceCache
+
+    safeRemove "/Library/LaunchAgents/com.webex.pluginagent.plist"
 
     safeRemove "${loggedInUserHome}/Library/Application Support/Cisco/Webex Plugin"
     safeRemove "${loggedInUserHome}/Library/Application Support/Cisco/Webex Meetings"
@@ -2829,6 +3049,8 @@ function op_remove_webexpt() {
     safeRemove "${loggedInUserHome}/Library/Logs/PT"
     safeRemove "${loggedInUserHome}/Library/Logs/webexmta"
     safeRemove "${loggedInUserHome}/Library/Preferences/com.cisco.webex.pluginservice.plist"
+    safeRemove "${loggedInUserHome}/Library/Preferences/com.cisco.webex.webexmta.plist"
+    safeRemove "${loggedInUserHome}/Library/Preferences/com.cisco.webex.meetings.plist"
 
     safeRemove "/Library/Application Support/Microsoft/WebExPlugin"
     safeRemove "/Library/ScriptingAdditions/WebexScriptAddition.osax"
@@ -3045,7 +3267,7 @@ function main() {
             info "Operation succeeded: ${op}"
         elif [[ ${operationRC} -eq 0 ]]; then
             appendFailure "${op}"
-            errorOut "Operation failed: ${op} (${removalFailures} path(s) not removed)"
+            errorOut "Operation failed: ${op} (${removalFailures} item(s) not removed)"
         else
             appendFailure "${op}"
             errorOut "Operation failed: ${op}"

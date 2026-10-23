@@ -8,8 +8,8 @@ This tool runs with **`root` privileges** and can perform destructive operations
 
 Only the **latest release** is actively supported for security updates.
 
-- Current stable: [v2.0.1](https://github.com/dan-snelson/Microsoft-365-Reset/releases) (and newer)
-- Older releases, including `2.0.0`, `1.x`, and the `2.0.0` betas, receive no security patches; upgrade to the current release.
+- Current stable: [v3.0.0](https://github.com/dan-snelson/Microsoft-365-Reset/releases) (and newer)
+- Older releases, including `2.0.1`, `2.0.0`, `1.x`, and the `2.0.0` and `3.0.0` betas, receive no security patches; upgrade to the current release.
 
 We strongly recommend always using the latest version, especially in Jamf Pro Self Service or MDM deployments.
 
@@ -36,12 +36,12 @@ We will work with you to understand, reproduce, and fix the issue, then coordina
 
 ## Security Best Practices When Using This Tool
 
-- Always test in a lab/VM before broad deployment (especially `remove_office`, `remove_outlook_data`, `remove_onenote_data`, and `remove_defender` operations).
+- Always test in a lab/VM before broad deployment (especially `reset_factory`, `remove_office`, `remove_outlook_data`, `remove_onenote_data`, and `remove_defender` operations).
 - In interactive modes, the script requires explicit confirmation for destructive actions.
 - In `self-service` mode, always supply an `--operations` / Parameter `$5` allowlist; an empty allowlist exits `10` during preflight unless `--allow-all-operations` / Parameter `$6` is `true` (reserve that for deliberately broad, admin-only policies).
 - In `silent` mode, double-check your `--operations` or Parameter `$5` list — there is no UI confirmation.
 - `test` mode is **not** a dry run; it performs real operations.
-- Microsoft packages must pass `pkgutil --check-signature` (exit status, an Apple-issued distribution certificate, and the Microsoft signer) and content-length checks during auto-repair; a damaged or version-mismatched app is moved aside only after its replacement passes verification, and is restored if the install fails or (Teams, OneDrive, and MAU) the new bundle fails codesign.
+- Microsoft packages must pass `pkgutil --check-signature` (exit status, an Apple-issued distribution certificate, and the Microsoft signer) during auto-repair, plus a content-length check when the server reports a size (a missing size logs a `WARNING`, and the signature check still gates the install); a damaged or version-mismatched app is moved aside only after its replacement passes verification, and is restored if the install fails or (Teams, OneDrive, and MAU) the new bundle fails codesign.
 - Root path trust guardrails:
     - `PATH` is pinned to `/usr/bin:/bin:/usr/sbin:/sbin`
     - swiftDialog must be root-owned, not group/other-writable, and signed by Team ID `PWA5E9TQ59`
@@ -82,4 +82,4 @@ Grateful for the Mac Admins community that keeps us all safer.
 
 — Dan K. Snelson  
 
-Last updated: 03-Oct-2026
+Last updated: 22-Oct-2026

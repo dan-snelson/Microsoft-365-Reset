@@ -1,6 +1,6 @@
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/dan-snelson/Microsoft-365-Reset?display_name=tag) ![GitHub issues](https://img.shields.io/github/issues-raw/dan-snelson/Microsoft-365-Reset) ![GitHub closed issues](https://img.shields.io/github/issues-closed-raw/dan-snelson/Microsoft-365-Reset) ![GitHub pull requests](https://img.shields.io/github/issues-pr-raw/dan-snelson/Microsoft-365-Reset) ![GitHub closed pull requests](https://img.shields.io/github/issues-pr-closed-raw/dan-snelson/Microsoft-365-Reset) [![swiftDialog](https://img.shields.io/badge/swiftDialog-Enabled-blue)](https://swiftdialog.app) [![Semgrep Security Scan](https://img.shields.io/badge/security%20scanned%20by-Semgrep-00C7B7?style=flat&logo=semgrep&logoColor=white)](https://semgrep.dev)
 
-# Microsoft 365 Reset (2.0.1)
+# Microsoft 365 Reset (3.0.0)
 
 <img src="images/Microsoft_365_Reset_Hero.jpg" alt="Microsoft 365 Reset" width="600" />
 
@@ -13,7 +13,7 @@ Unified `zsh` script to repair, reset, or remove Microsoft 365 components on mac
 > [!CAUTION]
 > **This is a potentially destructive script.** It runs as `root` and — depending on the operations selected — it can:
 >
-> - **Permanently delete local data:** Outlook mailbox data, OneNote content that has not synced to the cloud, Office templates and preferences, and sign-in items in the user's keychain
+> - **Permanently delete local data:** Outlook mailbox data (also removed by `reset_factory`), OneNote content that has not synced to the cloud, Office templates and preferences, and sign-in items in the user's keychain
 > - **Remove security tooling:** `remove_defender` uninstalls Microsoft Defender
 > - **Remove every Microsoft 365 app:** `remove_office` also deletes local Outlook profile data, managed preferences, and the shared `/Library/Logs/Microsoft` folder, which other Microsoft products (for example, Defender and Intune) also write to
 > - **Force-quit Microsoft apps:** unsaved work in Word, Excel, PowerPoint, Outlook, OneNote, OneDrive, and Teams is lost; interactive modes tell the user to save first; `silent` runs **give no warning**
@@ -44,12 +44,21 @@ The script consolidates expanded package workflows into one root-run tool with:
 - App repair/reinstall flows for Word, Excel, PowerPoint, Outlook, and OneNote stop after repair without continuing into configuration cleanup, matching current MOFA behavior
 - Teams background preservation (destination folders created in the console user's context), TCC reset, and retention of a valid current Teams app bundle align with current MOFA behavior
 - `remove_office` removes only the Office-owned children of `/Library/Application Support/Microsoft` (`MAU2.0`, `MERP2.0`, `Office365`) and no longer forgets the Defender (`com.microsoft.wdav`) package receipt, matching current MOFA Office Removal; like MOFA, it still removes `/Library/Logs/Microsoft` and `~/Library/Application Support/Microsoft`
+- `reset_onenote` keeps the OneNote container (`~/Library/Containers/com.microsoft.onenote.mac`), which holds the local sync cache, matching current MOFA behavior; only `remove_onenote_data` removes it
+- Reset operations ask Microsoft apps to quit (`SIGTERM`), wait 2 seconds (3 for `reset_factory`) only when something was running, then force-quit (`SIGKILL`) anything left; `reset_powerpoint` and removal operations force-quit immediately, matching current MOFA behavior
+- `remove_office`, `remove_outlook_data`, `remove_skypeforbusiness`, `remove_webexpt`, and `remove_zoomplugin` flush cached preferences before deleting preference files, matching current MOFA behavior; the flush is limited to the console user and `root`
+- `remove_zoomplugin` targets the paths Zoom's `ZoomMacOutlookPlugin.pkg` installs, matching current MOFA Zoom Plugin Removal
 
 Intentional divergences from current MOFA behavior:
 
-- `reset_factory` directly performs MOFA-aligned suite cleanup and intentionally adds package-era dependency expansion; it leaves profile-delivered `/Library/Managed Preferences` files in place (no reset operation removes them; only `remove_office` does)
+- `reset_factory` directly performs MOFA-aligned suite cleanup and intentionally adds package-era dependency expansion; it archives classic Teams backgrounds before cleanup and requires destructive confirmation in interactive modes because it deletes the Office group container, including local Outlook data
+- Reset operations leave profile-delivered `/Library/Managed Preferences` files in place; MOFA's Word, Excel, Outlook, OneNote, OneDrive, and Teams resets remove that app's managed preference files. Only `remove_office` removes them here
 - `reset_teams` suppresses Screen Recording settings in `silent` mode, preserves classic and work-or-school Teams bundles during a standard reset, does not install current Teams when its main app bundle is absent, and stops before cleanup when Teams backgrounds cannot be archived or staged (backgrounds under a symlinked parent directory are skipped with a `WARNING` and cleanup continues); backgrounds are archived, staged in the console user's home folder, and restored as the console user instead of in a fixed `/tmp` path
 - AutoUpdate registration treats new Teams as the current `TEAMS21` product while keeping classic Teams on the legacy product ID
+- `remove_zoomplugin` and `remove_skypeforbusiness` do not remove Dock entries; MOFA uses a bundled `dockutil`, and this repo adds no third-party dependency
+- `remove_webexpt` stops WebEx Productivity Tools processes by install path, and `webexmta` by exact name, instead of MOFA's bare `pluginagent` pattern, so other vendors' plugin agents keep running
+- `remove_defender`, `remove_zoomplugin`, and `remove_webexpt` run a vendor uninstaller only when it and every parent directory are root-owned and not writable by non-admin users; MOFA runs any executable uninstaller it finds
+- Auto-repair logs a `WARNING` and relies on the Microsoft signature check when the server reports no `Content-Length` for a package; MOFA fails the repair instead. A reported size that does not match the download still fails the repair
 
 Repo-local operations without current MOFA community-script equivalents:
 
@@ -134,13 +143,13 @@ Impact key: **Reset** = removes caches, settings, or sign-in state that rebuild 
 
 | ID | Impact | Purpose |
 |---|---|---|
-| `reset_factory` | Reset | Stop Office/Microsoft services and prime factory reset dependency set; dependent app resets also defer same-run cleanup when a repair occurs |
+| `reset_factory` | **Data loss** | Stop Office/Microsoft services and prime factory reset dependency set; deletes the Office group container (including local Outlook data, Office templates, and custom dictionaries) and `~/Library/Application Support/Microsoft` after archiving classic Teams backgrounds; dependent app resets also defer same-run cleanup when a repair occurs |
 | `reset_word` | Reset | Word repair/reinstall when needed, or Word config/template cleanup when no repair occurs |
 | `reset_excel` | Reset | Excel repair/reinstall when needed, or Excel config/template cleanup when no repair occurs |
 | `reset_powerpoint` | Reset | PowerPoint repair/reinstall when needed, or template/theme/add-in cleanup when no repair occurs |
 | `reset_outlook` | Reset | Outlook repair/reinstall when needed, or Outlook config/keychain cleanup when no repair occurs |
-| `remove_outlook_data` | **Data loss** | Remove Outlook local mailbox profile/data |
-| `reset_onenote` | Reset | OneNote repair/reinstall when needed, or container/group cleanup when no repair occurs |
+| `remove_outlook_data` | **Data loss** | Remove Outlook local mailbox profile/data, including the legacy Outlook 2016 data folder (`~/Library/Application Support/Microsoft/Outlook`), plus Outlook caches, saved state, and cookies |
+| `reset_onenote` | Reset | OneNote repair/reinstall when needed, or preference, share-extension, and group-container cleanup when no repair occurs; keeps the OneNote container (local sync cache) |
 | `remove_onenote_data` | **Data loss** | Remove OneNote cached local data, including content not yet synced to the cloud |
 | `reset_onedrive` | Reset | OneDrive repair checks + cache/container/keychain cleanup |
 | `reset_teams` | Reset | Teams reset with installed-app validation/repair + Teams cache/container/keychain cleanup; leaves current Teams absent when no main app bundle exists |
@@ -152,8 +161,8 @@ Impact key: **Reset** = removes caches, settings, or sign-in state that rebuild 
 | `remove_skypeforbusiness` | Removal | Remove Skype for Business app/data/keychain entries |
 | `remove_defender` | **Security** | Remove Microsoft Defender app/data/receipts; fails the run (exit `20`) if the uninstaller fails or the app remains |
 | `remove_acrobat_addin` | Removal | Remove Adobe Acrobat add-in payloads from Word, Excel, and PowerPoint startup folders in both system and user Office content paths |
-| `remove_zoomplugin` | Removal | Remove Zoom Outlook plugin and related metadata |
-| `remove_webexpt` | Removal | Remove WebEx Productivity Tools and related metadata |
+| `remove_zoomplugin` | Removal | Remove Zoom Outlook plugin, its LaunchAgent, scripting additions, and related metadata; leaves the Zoom app's own preferences in place |
+| `remove_webexpt` | Removal | Remove WebEx Productivity Tools, its LaunchAgent, and related metadata |
 
 ## Dependency Rules
 
@@ -198,6 +207,7 @@ Remove `remove_acrobat_addin` from that array to restore force-quit behavior for
 
 In interactive modes, a second confirmation dialog is required when any of these are selected:
 
+- `reset_factory`
 - `remove_office`
 - `remove_outlook_data`
 - `remove_onenote_data`
@@ -350,6 +360,7 @@ The report uses `Covered`, `Candidate inclusion`, `Intentional divergence`, `Loc
 - MOFA stable feed metadata from `latest_raw_files/macos_standalone_latest.json`
 - Hard-coded local repair links, MAU application IDs, and current minimum-version thresholds for Teams and MAU
 - Resolved `file://` links back to the sibling MOFA scripts referenced by the report
+- Each mapped MOFA script's last commit date (`MOFA Last Changed`) against the last commit of `Microsoft-365-Reset.zsh`; scripts changed upstream since then are listed under `Upstream Changes Since Local Script` for semantic review, without changing their classification. When git history is unavailable, the comparison is skipped with a warning; uncommitted local changes are not compared
 
 Local operation coverage requires the operation ID, implementation function, dispatcher entry, and deterministic execution-phase entry. Expected local repair URLs, application IDs, and minimum-version thresholds must also remain present in `Microsoft-365-Reset.zsh`. These are structural and metadata checks; semantic parity still requires implementation review.
 
@@ -360,12 +371,12 @@ Local operation coverage requires the operation ID, implementation function, dis
 | `0` | Success, including intentional user cancellation in interactive modes |
 | `2` | No operations provided in `silent` mode or destructive confirmation was not acknowledged |
 | `10` | Preflight/validation failure, including an empty `self-service` allowlist without `--allow-all-operations` / `$6` |
-| `20` | One or more operations failed, including any path an operation could not remove |
+| `20` | One or more operations failed, including any path or keychain item an operation could not remove |
 
 Every run that reaches preflight ends with a `NOTICE` log line summarizing succeeded and failed operation counts, failed operation IDs, elapsed time, and the exit code, so `silent` runs are auditable without the completion dialog:
 
 ```text
-M365R (2.0.1): 2026-10-03 10:34:46  [NOTICE] Exiting: 9 succeeded, 1 failed (reset_teams); Elapsed Time: 0h:1m:12s; exit code 20
+M365R (3.0.0): 2026-10-03 10:34:46  [NOTICE] Exiting: 9 succeeded, 1 failed (reset_teams); Elapsed Time: 0h:1m:12s; exit code 20
 ```
 
 ## Validation
@@ -379,14 +390,16 @@ zsh -n ./Microsoft-365-Reset.zsh
 ## Safety Notes
 
 - **This script is potentially destructive.** See the caution at the top of this README before scoping any policy.
-- `remove_office`, `remove_outlook_data`, and `remove_onenote_data` can permanently remove local data; `remove_defender` removes security tooling.
+- `reset_factory`, `remove_office`, `remove_outlook_data`, and `remove_onenote_data` can permanently remove local data and require destructive confirmation in interactive modes; `remove_defender` removes security tooling. `reset_factory` deletes local Outlook data, Office templates, and custom dictionaries.
 - `remove_office` deletes `/Library/Logs/Microsoft`, which Defender and Intune also use; expect those local logs to be gone after a full removal.
 - Reset operations force-quit Microsoft apps; ask users to save their work first, especially for `silent` runs.
 - `reset_credentials` and `reset_factory` delete keychain sign-in items; users must sign in again.
 - Removals under the console user's home folder are refused when a parent directory resolves through a symlink, so a user-planted link cannot redirect a root deletion outside the home folder; refusals are logged as `WARNING` lines.
 - Removals under the console user's home folder and per-user temp folder run as the console user, not root; root-owned folders left in the home folder (for example, by older tools) are not removed, are logged as `WARNING` lines, and fail the operation (exit `20`). Per-user temp-folder cleanup is best-effort and never fails an operation.
 - Reset operations leave profile-delivered `/Library/Managed Preferences` files to your MDM; only `remove_office` removes them.
-- `reset_teams` / `reset_teams_force` fail (exit `20`) before removing Teams data when moving Teams backgrounds to the archive or staging fails, so a failed preservation step never deletes them; backgrounds under a symlinked parent directory are skipped with a `WARNING` and cleanup continues.
+- Vendor uninstallers (Defender, Zoom Outlook Plugin, WebEx Productivity Tools) run as root only when the uninstaller and every parent directory are root-owned and not writable by non-admin users; otherwise the uninstaller is skipped with a log entry (Defender then fails, exit `20`) and files are removed directly.
+- Keychain items that remain after repeated deletion (for example, more than 50 matching items) fail the operation (exit `20`).
+- `reset_teams` / `reset_teams_force` fail (exit `20`) before removing Teams data when moving Teams backgrounds to the archive or staging fails; `reset_factory` archives classic Teams backgrounds before its cleanup and fails the same way, so a failed preservation step never deletes them; backgrounds under a symlinked parent directory are skipped with a `WARNING` and cleanup continues.
 - Teams backgrounds are archived, staged, and restored as the console user; if a restore fails, they stay in a `M365R_Teams_Backgrounds.*` folder in the user's home folder (opened for the user in interactive modes) and survive a restart.
 - Constrain each Self Service policy with `--operations` / `$5`. Reserve `--allow-all-operations` / `$6` for admin-only policies, and exclude `remove_defender` unless your security team approves.
 - `test` mode is not a dry run.

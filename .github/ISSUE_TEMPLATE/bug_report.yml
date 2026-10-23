@@ -53,7 +53,7 @@ body:
     attributes:
       label: Microsoft 365 Reset version tested
       description: Which release, version, or commit did you run?
-      placeholder: "e.g. 2.0.0 or main @ abc1234"
+      placeholder: "e.g. 3.0.0 or main @ abc1234"
     validations:
       required: true
 
