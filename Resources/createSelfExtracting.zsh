@@ -6,7 +6,7 @@
 
 # Updated by: Dan K. Snelson
 # For Microsoft 365 Reset
-# Date: 29-Sep-2026
+# Date: 22-Oct-2026
 # - Extract into a root-private `mktemp -d` directory (not a fixed `/var/tmp` path)
 # - Forward wrapper arguments (Jamf `$1`-`$6`, CLI flags) to the extracted script
 # - Restrict `--target` to inert filename characters (rejecting `.` and `..`)
